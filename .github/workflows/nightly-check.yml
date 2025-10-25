@@ -1,0 +1,20 @@
+name: Nightly SigmaLab Check
+
+on:
+  schedule:
+    - cron: "0 2 * * *"  # tous les jours à 02:00 UTC
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          pip install numpy pyyaml
+          python - <<'PY'
+          from engine.sigma_lab_v421 import SigmaLab, SigmaConfig
+          print("✅ Nightly import OK")
+          PY
