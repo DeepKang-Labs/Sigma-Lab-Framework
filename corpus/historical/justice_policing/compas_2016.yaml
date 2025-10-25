@@ -1,0 +1,19 @@
+id: compas_2016
+name: "COMPAS Risk Assessment (US Courts)"
+domain: justice_policing
+status: historical
+impact_scale: national
+sources:
+  - "ProPublica (2016) investigative report"
+  - "Scholarly analyses on COMPAS bias (2017–2019)"
+parameters:
+  base_risk: 0.75
+  irreversibility: 0.85
+  equity_distribution: [0.25, 0.75]
+  equity_gini: 0.45
+outcome: "Controversy over racial bias; ongoing legal & academic scrutiny"
+justifications:
+  base_risk: "Systemic impact on sentencing & bail"
+  irreversibility: "Records & judicial outcomes difficult to reverse"
+  equity: "Over-exposure among Black defendants documented"
+review_status: peer_reviewed
