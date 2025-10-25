@@ -1,0 +1,5 @@
+target_scores:
+  non_harm: 0.65
+  stability: 0.70
+  resilience: 0.70
+  equity: 0.60
