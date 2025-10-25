@@ -1,0 +1,19 @@
+id: netherlands_welfare_2020
+name: "Netherlands Welfare Fraud Algorithms"
+domain: welfare_social
+status: historical
+impact_scale: national
+sources:
+  - "Dutch government & court findings (2020)"
+  - "Major press investigations"
+parameters:
+  base_risk: 0.80
+  irreversibility: 0.80
+  equity_distribution: [0.30, 0.70]
+  equity_gini: 0.40
+outcome: "Government resignation; systems retracted"
+justifications:
+  base_risk: "Massive harm to vulnerable families"
+  irreversibility: "Debt, stigma, long-term harm"
+  equity: "Targeting disadvantaged groups"
+review_status: peer_reviewed
