@@ -1,0 +1,96 @@
+version: "1.1"
+provenance:
+  source: "SkyWire Community Working Group"
+  rationale: "Updatable mappings between SkyWire technical tensions and SIGMA dimensions"
+  last_review: "2025-10-25"
+
+mappings:
+  - mapping_id: perf_vs_decent
+    skywire_tension: "performance_vs_decentralisation"
+    keywords: ["latency", "decentralization", "routing", "throughput"]
+    sigma_dimensions: ["stability", "resilience"]
+    derive_risk:
+      short_term: "user_experience_impact/10"
+      long_term:  "technical_complexity/10"
+      irreversibility: "security_implications/10"
+    stakeholder_impact:
+      node_operators: 0.8
+      users: 0.7
+      developers: 0.6
+    rationale: "Latency and decentralized orchestration affect stability and resilience."
+
+  - mapping_id: security_vs_usability
+    skywire_tension: "security_vs_usability"
+    keywords: ["security", "usability", "auth", "keys", "privacy", "logs"]
+    sigma_dimensions: ["non_harm", "stability"]
+    derive_risk:
+      short_term: "security_implications/10"
+      long_term:  "user_experience_impact/10"
+      irreversibility: "max(security_implications, technical_complexity)/10"
+    stakeholder_impact:
+      users: 0.9
+      node_operators: 0.6
+      developers: 0.5
+    rationale: "Security vs user friction trade-off → non-harm / stability balance."
+
+  - mapping_id: innovation_vs_stability
+    skywire_tension: "innovation_vs_stability"
+    keywords: ["upgrade", "breaking", "fork", "protocol change", "innovation", "smux"]
+    sigma_dimensions: ["resilience", "stability", "non_harm"]
+    derive_risk:
+      short_term: "technical_complexity/10"
+      long_term:  "economic_impact/10"
+      irreversibility: "max(security_implications, technical_complexity)/10"
+    stakeholder_impact:
+      developers: 0.8
+      node_operators: 0.7
+      users: 0.6
+    rationale: "Innovation pace vs network cohesion → resilience and stability trade-offs."
+
+aliases:
+  stakeholders:
+    "relay_nodes": "node_operators"
+    "end_users": "users"
+    "core_devs": "developers"
+
+observed_issues:
+  - id: GH-1968
+    repo: "skycoin/skywire"
+    url: "https://github.com/skycoin/skywire/issues/1968"
+    title: 'WARN [router]: failed to dial setup node: error="i/o deadline reached"'
+    labels: ["bug", "routing", "setup-node", "deployment"]
+    mapped_dimensions: ["stability", "non_harm"]
+    mapped_tension: "performance_vs_decentralisation"
+    rationale: "Session setup failures cause unavailability and degraded UX."
+  - id: GH-1954
+    repo: "skycoin/skywire"
+    url: "https://github.com/skycoin/skywire/issues/1954"
+    title: 'WARN [router]: Failed to handle transport frame: routing table: rule not found'
+    labels: ["bug", "routing", "logging"]
+    mapped_dimensions: ["stability", "resilience"]
+    mapped_tension: "innovation_vs_stability"
+    rationale: "Routing rule inconsistency indicates operational fragility."
+  - id: GH-2006
+    repo: "skycoin/skywire"
+    url: "https://github.com/skycoin/skywire/issues/2006"
+    title: "Services become inaccessible via certain dmsg servers"
+    labels: ["bug", "dmsg", "availability"]
+    mapped_dimensions: ["stability", "non_harm"]
+    mapped_tension: "performance_vs_decentralisation"
+    rationale: "Service inaccessibility through dmsg nodes → user-facing risk."
+  - id: GH-2065
+    repo: "skycoin/skywire"
+    url: "https://github.com/skycoin/skywire/issues/2065"
+    title: "Operationalizing smux across services"
+    labels: ["bug", "transport", "smux"]
+    mapped_dimensions: ["resilience", "stability"]
+    mapped_tension: "innovation_vs_stability"
+    rationale: "Protocol multiplexing increases surface for regressions."
+  - id: GH-2077
+    repo: "skycoin/skywire"
+    url: "https://github.com/skycoin/skywire/issues/2077"
+    title: "Batch file fails to start visor on Windows .msi"
+    labels: ["bug", "windows", "installer"]
+    mapped_dimensions: ["stability", "equity"]
+    mapped_tension: "security_vs_usability"
+    rationale: "Multi-platform reliability → fairness and deployment stability."
