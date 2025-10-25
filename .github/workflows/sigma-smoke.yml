@@ -1,0 +1,44 @@
+name: SigmaLab Smoke Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal deps
+        run: |
+          python -m pip install --upgrade pip
+          # Déps min pour importer le core (ajuste si besoin)
+          pip install numpy pyyaml
+
+      - name: Import adapter & core
+        run: |
+          python - <<'PY'
+          try:
+              from engine.sigma_lab_v421 import SigmaLab, SigmaConfig
+              print("✅ Adapter import OK:", SigmaLab, SigmaConfig)
+          except Exception as e:
+              print("❌ Adapter import FAILED")
+              raise
+          PY
+
+      # (Optionnel) si tu as déjà des tests unitaires:
+      - name: Run quick unit tests (if any)
+        run: |
+          if [ -d "tests" ]; then
+            python -m pip install pytest
+            pytest -q || exit 1
+          else
+            echo "No tests/ folder, skipping."
+          fi
