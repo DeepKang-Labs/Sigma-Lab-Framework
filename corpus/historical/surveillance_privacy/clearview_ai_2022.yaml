@@ -1,0 +1,19 @@
+id: clearview_ai_2022
+name: "Clearview AI Facial Recognition"
+domain: surveillance_privacy
+status: historical
+impact_scale: international
+sources:
+  - "Regulatory enforcement (UK ICO, CNIL 2021–2022)"
+  - "Press & legal filings"
+parameters:
+  base_risk: 0.80
+  irreversibility: 0.85
+  equity_distribution: [0.25, 0.75]
+  equity_gini: 0.45
+outcome: "Fines & orders to stop; ongoing litigation"
+justifications:
+  base_risk: "Mass biometric scraping without consent"
+  irreversibility: "Biometrics cannot be 'revoked'"
+  equity: "Higher error rates for minority groups; broad exposure"
+review_status: peer_reviewed
