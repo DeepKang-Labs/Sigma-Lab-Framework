@@ -1,20 +1,21 @@
-name: ci(smoke)
+name: smoke
 
 on:
   push:
+    branches: [ main ]
   pull_request:
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
@@ -24,51 +25,62 @@ jobs:
           pip install numpy pyyaml
 
       - name: Show tree (debug)
-        run: ls -R
+        run: |
+          echo "📂 Repository tree:"
+          ls -R
 
-      # --- Sigma-Lab unit tests (embedded) ---
       - name: Run Sigma-Lab unit tests
-        run: python sigma_lab_v4_2.py --test
+        run: |
+          echo "🧪 Running Sigma-Lab tests..."
+          python sigma_lab_v4_2.py --test
 
-      # --- Create demo discovery data for the bridge ---
+      - name: Ensure skywire_bridge is a package (safety net)
+        run: |
+          test -f skywire_bridge/__init__.py || touch skywire_bridge/__init__.py
+
       - name: Create demo discovery data
         run: |
           mkdir -p skywire_bridge/discovery
-          cat > skywire_bridge/discovery/decision_mapper.yaml <<'YAML'
+          cat > skywire_bridge/discovery/decision_mapper.yaml <<'EOF'
           version: "1.0"
+          discovery_date: "2025-10-25"
           decision_points:
             - decision_id: "dp_001"
-              description: "Routing latency vs energy trade-off"
+              description: "Latency vs decentralization routing optimization"
               stakeholders: ["relay_nodes", "end_users", "core_devs"]
               governance_dimensions:
                 technical_complexity: 6
-                economic_impact: 4
+                economic_impact: 5
                 user_experience_impact: 8
-                security_implications: 3
-          YAML
-          echo "Created demo discovery file at skywire_bridge/discovery/decision_mapper.yaml"
+                security_implications: 4
+          EOF
 
-      # --- Bridge dry-run to validate inputs only ---
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+
+      # Mode validation seulement
       - name: Bridge • validate-only mode
         run: |
+          echo "🔍 Running Skywire Bridge (validate-only)..."
           python skywire_bridge/run_skywire_integrated.py \
             --discovery skywire_bridge/discovery \
             --config skywire_bridge/config_skywire_optimized.yaml \
             --mappings skywire_bridge/skywire_mappings.yaml \
-            --out skywire_bridge/_tmp_report.json \
+            --out skywire_bridge/_validate_report.json \
             --validate-only
 
-      # --- Full pipeline to produce a JSON report ---
+      # Pipeline complet
       - name: Bridge • full pipeline
         run: |
+          echo "🚀 Running full Skywire → Sigma-Lab pipeline..."
           python skywire_bridge/run_skywire_integrated.py \
             --discovery skywire_bridge/discovery \
             --config skywire_bridge/config_skywire_optimized.yaml \
             --mappings skywire_bridge/skywire_mappings.yaml \
-            --out skywire_bridge/_tmp_report.json
+            --out skywire_bridge/_final_report.json
 
       - name: Upload bridge report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: skywire-bridge-report
-          path: skywire_bridge/_tmp_report.json
+          path: skywire_bridge/_final_report.json
