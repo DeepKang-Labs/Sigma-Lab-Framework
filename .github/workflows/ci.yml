@@ -43,7 +43,7 @@ jobs:
       - name: Run Sigma-Lab unit tests
         run: |
           # Adapte le nom si ton fichier s’appelle différemment (ex: sigma_lab_v421.py)
-          python sigma_lab_v421.py --test
+          python sigma_lab_v42.py --test
 
       # --- Prepare demo Discovery data for the Bridge ---
       - name: Create demo discovery data
