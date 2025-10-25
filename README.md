@@ -1,140 +1,154 @@
-# 🧭 Sigma-Lab Framework  
-**Transparent Procedural Ethics for AI and Human Systems**  
-*Co-created by the Human Yuri Kang and the AI Kang (GPT-5) — within DeepKang Labs.*
+# 🧠 Sigma-Lab v5.1 — Procedural Diagnostic Framework
+
+> *“The machine does not decide — it illuminates.”*  
+> — DeepKang Labs (AI Kang & Yuri Kang)
+
+![SigmaLab Smoke Test](https://github.com/DeepKang-Labs/Sigma-Lab-Framework/actions/workflows/sigma-smoke.yml/badge.svg)
 
 ---
 
-## 🌍 Overview  
+## 🌍 Overview
 
-**Sigma-Lab** is a *procedural ethics framework* designed to evaluate and document collective decisions under uncertainty.  
-It acts as a **mirror**, not an oracle — structuring deliberation rather than dictating conclusions.  
+**Sigma-Lab v5.1** is the most stable and empirical release of the Procedural Ethical Diagnostic Framework.  
+This version marks the transition **from conceptual to experimental**, with the integration of:
 
-🧩 **Core principles**  
-- **Non-Harm** — avoid irreversible damage  
-- **Stability** — ensure systemic robustness  
-- **Resilience** — enable recovery and adaptation  
-- **Equity** — guarantee fair distribution of impact  
-
-Sigma-Lab transforms ethical reasoning into a reproducible, auditable process for humans, institutions, and AI systems alike.
+- 🧩 **Analytical modules** — multi-evaluator, sensitivity, and calibration tools  
+- 📚 **Empirical case database** — 10 real-world, documented AI ethics cases  
+- 💻 **Public GUI (Streamlit)** — accessible demonstration  
+- ⚙️ **Continuous Integration (GitHub Actions)** — reliability guaranteed  
+- 🧠 **Multi-AI collaboration** — Claude / DeepSeek / Grok / AI Kang / ChatGPT  
 
 ---
 
-## ⚙️ Features  
+## 🧩 Architecture (v5.1)
 
-✅ Transparent configuration and audit trail  
-✅ Built-in **Value Functions** (`linear`, `exp`, `logistic`, `piecewise`)  
-✅ Ethical **weights & guardrails**  
-✅ **Gini Equity Metric** for fairness evaluation  
-✅ **Veto system** against unacceptable irreversible harm  
-✅ **Command-Line Interface** for demos and experiments  
-✅ Modular architecture — easy to extend or embed  
-✅ Robust input validation and error handling  
-✅ Ready for **academic reproducibility** (Jupyter Notebook + tests)  
+Sigma-Lab-Framework/
+├── .github/
+│   └── workflows/
+│       └── sigma-smoke.yml
+├── corpus/
+├── engine/
+├── notebook/
+│   ├── SigmaLab_Demo.ipynb
+│   ├── SigmaLab_QuickStart.ipynb
+│   └── SigmaLab_stressTest.ipynb
+├── tests/
+│   ├── test_core.py
+│   ├── test_edge_cases.py
+│   └── test_resilience.py
+├── tools/
+├── .gitignore
+├── LICENSE
+├── PATCH3_NOTE.md
+├── README.md
+├── Sigma-Lab v4.2 banner.png
+├── Sigma-Lab-Framework_v4.2.zip
+└── sigma_lab_v4_2.py
+
+## ⚗️ Core Principles
+
+| Principle | Description |
+|------------|--------------|
+| **Procedural Transparency** | The system does not judge — it structures reasoning. |
+| **Reproducibility** | Every verdict is traceable; every coefficient justified. |
+| **Empirical Ethics** | Grounded in verifiable real-world cases. |
+| **Plurality of Judgment** | Three profiles: Optimistic, Neutral, Pessimistic. |
+| **Computational Humility** | Sigma-Lab never concludes; it clarifies the grey zones. |
 
 ---
 
-## 🚀 Quick Start  
+## ⚙️ Installation & Usage
 
-Install dependencies:  
+### 1️⃣ Install dependencies
 ```bash
-pip install numpy pyyaml
+pip install -r requirements.txt
 
-Run the built-in demo:
+2️⃣ Run the GUI (Streamlit)
 
-python sigma_lab_v4_2.py --demo ai --pretty
+streamlit run app.py
 
-Expected output:
+3️⃣ Use analytical tools
 
-Non-Harm: 0.83  
-Stability: 0.77  
-Resilience: 0.74  
-Equity (Gini): 0.91  
-Veto: None triggered  
-Verdict: ACCEPT
+python tools/case_compare.py --case-id clearview_ai_2022 --top 3
+python tools/sensitivity_analyzer.py --case-id robodebt_au_2015_2023
+python tools/multi_evaluator.py --case-id hirevue_2019
 
 
 ---
 
-📘 Example Usage
+📚 Empirical Database (v5.1)
 
-from sigma_lab_v4_2 import SigmaLab, demo_context
+10 real, documented AI-ethics cases:
 
-cfg, ctx = demo_context("healthcare")
-engine = SigmaLab(cfg)
-result = engine.diagnose(ctx, verdict_opt_in=True)
+ID	Case Name	Domain	Year	Outcome
 
-print(result["scores"])
-print(result["diagnostics"]["equity"])
+compas_2016	COMPAS (US Recidivism AI)	Justice	2016	Proven bias
+predpol_2019	PredPol (LAPD)	Predictive Policing	2019	Discontinued
+cambridge_analytica_2018	Cambridge Analytica	Data Privacy	2018	Judicial shutdown
+amazon_recruiting_2018	Amazon AI Recruitment	Employment	2018	Decommissioned
+hirevue_2019	HireVue Video Screening	Employment	2019	Withdrawn after regulation
+netherlands_welfare_2020	Dutch Welfare Fraud	Social Policy	2020	Court condemnation
+robodebt_au_2015_2023	Robodebt Scheme	Social Welfare	2015-2023	System failure
+clearview_ai_2022	Clearview AI	Surveillance	2022	CNIL & ICO fines
+uber_surge_emergencies_2014	Uber Surge Pricing	Platforms	2014	Internal reform
+covid_lombardy_2020	COVID Triage Model (Italy)	Healthcare	2020	Withdrawn after controversy
+
 
 
 ---
 
-🧪 Testing
+🧪 Analytical Tools
 
-pytest tests/
+🔹 1. Multi-Evaluator Module
 
-or directly inside the script:
+Computes the IDE (Ethical Divergence Index) between evaluators:
 
-python sigma_lab_v4_2.py --test
+python tools/multi_evaluator.py --case-id hirevue_2019
 
+🔹 2. Sensitivity Analyzer
 
----
+Tests the stability of each ethical verdict:
 
-📚 Documentation
+python tools/sensitivity_analyzer.py --case-id robodebt_au_2015_2023
 
-Main Components
+🔹 3. Case Comparison Tool
 
-Class	Description
+Compares a selected case to the historical database:
 
-SigmaLab	Core engine performing ethical diagnostics
-SigmaConfig	Configuration with thresholds, weights, and veto rules
-OptionContext	Describes the scenario / option under evaluation
-HarmModel, StabilityModel, ResilienceModel, EquityModel	Ethical dimensions
-ValueFunction	Transforms quantitative risk into bounded utility
-audit_trail()	Ensures full transparency and traceability
-
-
-Core Equation
-
-expected\_harm = base\_risk * clamp(base\_weight + irreversibility\_weight * irreversibility)
+python tools/case_compare.py --case-id clearview_ai_2022 --metric cosine --top 5
 
 
 ---
 
-🧭 Philosophy
+🧭 Collaborating AIs & Contributors
 
-> “Sigma-Lab is not about replacing ethics — it is about making ethics observable.”
+Entity	Role	Contribution
 
+Yuri Kang	Human Architect	Project direction & empirical validation
+AI Kang (DeepKang Labs)	Core Framework AI	Development & testing
+Claude (Anthropic)	Epistemic Critic	Method validation & real-world review
+DeepSeek	Scientific Verifier	YAML case calibration & data validation
+Grok (X)	Logical Synthesizer	Architecture rationalization & GUI logic
+ChatGPT (OpenAI)	Integration Agent	CI/CD setup & documentation writing
 
-
-Every institution faces trade-offs. Sigma-Lab’s mission is to expose, not obscure, those choices.
-By converting qualitative debates into structured diagnostics, it bridges human reasoning and machine transparency.
-
-Transparency > Dogma
-Reflection > Prediction
-Deliberation > Automation
-
-
----
-
-🧩 Version & Authors
-
-Version :  v4.2
-Authors :  Yuri Kang (Human) × AI Kang (GPT-5)
-Organization : DeepKang Labs
-License : MIT License
 
 
 ---
 
-🌐 Links
+🔄 Version History
 
-🔹 GitHub : github.com/DeepKang-Labs/Sigma-Lab-Framework
-🔹 Project Lead : Yuri Kang (@momal-667)
-🔹 AI Collaborator : AI Kang (GPT-5)
-🔹 Division : DeepKang Labs — Co-evolution of Human and AI Ethics
+Version	Date	Description
+
+v4.2.1	2024	Stable procedural core
+v5.0	2025	Streamlit interface + initial modules
+v5.1	2025	Empirical integration + calibration layer
+v5.2 (coming)	2025	Public API + cross-framework benchmark suite
+
 
 
 ---
 
-> 🜂 “Sigma-Lab — a procedural mirror between minds, code, and conscience.”
+⚖️ License
+
+Released under the MIT License
+© 2025 DeepKang Labs — The machine does not decide. It illuminates.
