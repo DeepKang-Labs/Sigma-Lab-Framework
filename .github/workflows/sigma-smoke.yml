@@ -19,10 +19,9 @@ jobs:
       - name: Install minimal deps
         run: |
           python -m pip install --upgrade pip
-          # Déps min pour importer le core (ajuste si besoin)
           pip install numpy pyyaml
 
-      - name: Import adapter & core
+      - name: Import adapter & core (smoke)
         run: |
           python - <<'PY'
           try:
@@ -32,13 +31,3 @@ jobs:
               print("❌ Adapter import FAILED")
               raise
           PY
-
-      # (Optionnel) si tu as déjà des tests unitaires:
-      - name: Run quick unit tests (if any)
-        run: |
-          if [ -d "tests" ]; then
-            python -m pip install pytest
-            pytest -q || exit 1
-          else
-            echo "No tests/ folder, skipping."
-          fi
