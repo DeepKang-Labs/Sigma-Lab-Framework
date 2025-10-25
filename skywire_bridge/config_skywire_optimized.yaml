@@ -1,0 +1,39 @@
+provenance:
+  source: "SkyWire Governance Integration"
+  doc_ref: "SKY-GOV-BRIDGE-1.1"
+  rationale: "Optimized SIGMA config for mesh network governance (stability + resilience focus)"
+
+weights:
+  values:
+    non_harm: 0.25
+    stability: 0.35
+    resilience: 0.30
+    equity: 0.10
+  provenance:
+    source: "SkyWire Technical Committee"
+    rationale: "Prioritizing network stability and resilience"
+
+thresholds:
+  values:
+    non_harm_floor: 0.35
+    veto_irreversibility: 0.70
+  provenance:
+    source: "SkyWire Risk Assessment"
+    rationale: "Adjusted tolerance for upgradable protocols"
+
+value_functions:
+  non_harm: { kind: "linear" }
+  stability:
+    kind: "piecewise"
+    params:
+      points: [[0,0],[0.4,0.3],[0.7,0.8],[1,1]]
+  resilience:
+    kind: "exp"
+    params: { a: 2.0 }
+  equity: { kind: "linear" }
+
+mode: "PROFILE_ONLY"
+no_aggregation: true
+sensitivity_grid_points: 5
+fairness_social_welfare_alpha: 0.25
+fairness_index_mix: { gini: 0.5, atkinson: 0.3, theil: 0.2 }
