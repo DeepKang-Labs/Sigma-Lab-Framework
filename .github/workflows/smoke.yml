@@ -80,7 +80,7 @@ jobs:
             --out skywire_bridge/_final_report.json
 
       - name: Upload bridge report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: skywire-bridge-report
           path: skywire_bridge/_final_report.json
