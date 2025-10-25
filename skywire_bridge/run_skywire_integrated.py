@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 # Use relative import so the package works both locally and in CI
-from .sigma_bridge import SigmaBridge
+from skywire_bridge.sigma_bridge import SigmaBridge
 
 
 # ----------------------------- helpers -----------------------------
