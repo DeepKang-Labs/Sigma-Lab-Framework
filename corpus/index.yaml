@@ -1,0 +1,19 @@
+version: "5.1"
+last_updated: "2025-10-25"
+total_cases: 10
+domains:
+  - justice_policing
+  - surveillance_privacy
+  - employment
+  - welfare_social
+  - platforms_pricing
+cases:
+  - { id: compas_2016, path: historical/justice_policing/compas_2016.yaml, domain: justice_policing, status: historical }
+  - { id: predpol_lapd_2019, path: historical/justice_policing/predpol_lapd_2019.yaml, domain: justice_policing, status: historical }
+  - { id: cambridge_analytica_2018, path: historical/surveillance_privacy/cambridge_analytica_2018.yaml, domain: surveillance_privacy, status: historical }
+  - { id: clearview_ai_2022, path: historical/surveillance_privacy/clearview_ai_2022.yaml, domain: surveillance_privacy, status: historical }
+  - { id: amazon_recruiting_2018, path: historical/employment/amazon_recruiting_2018.yaml, domain: employment, status: historical }
+  - { id: hirevue_2019, path: historical/employment/hirevue_2019.yaml, domain: employment, status: historical }
+  - { id: netherlands_welfare_2020, path: historical/welfare_social/netherlands_welfare_2020.yaml, domain: welfare_social, status: historical }
+  - { id: robodebt_au_2015_2023, path: historical/welfare_social/robodebt_au_2015_2023.yaml, domain: welfare_social, status: historical }
+  - { id: uber_surge_emergencies_2014, path: historical/platforms_pricing/uber_surge_emergencies_2014.yaml, domain: platforms_pricing, status: historical }
