@@ -1,0 +1,19 @@
+id: uber_surge_emergencies_2014
+name: "Uber Surge Pricing during emergencies"
+domain: platforms_pricing
+status: historical
+impact_scale: city
+sources:
+  - "NYT/Guardian coverage (2014–2015)"
+  - "Company policy changes & public statements"
+parameters:
+  base_risk: 0.60
+  irreversibility: 0.45
+  equity_distribution: [0.40, 0.60]
+  equity_gini: 0.20
+outcome: "Backlash; policy adjustments & caps in emergencies"
+justifications:
+  base_risk: "Access/price fairness concerns"
+  irreversibility: "Costs reversible; limited lasting harm"
+  equity: "Short-term burden uneven across lower-income users"
+review_status: peer_reviewed
