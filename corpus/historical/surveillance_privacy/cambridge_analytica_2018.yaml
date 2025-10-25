@@ -1,0 +1,19 @@
+id: cambridge_analytica_2018
+name: "Cambridge Analytica Data Scandal"
+domain: surveillance_privacy
+status: historical
+impact_scale: international
+sources:
+  - "UK ICO reports (2018)"
+  - "Major press investigations (Guardian/NYT)"
+parameters:
+  base_risk: 0.78
+  irreversibility: 0.80
+  equity_distribution: [0.30, 0.70]
+  equity_gini: 0.40
+outcome: "Regulatory actions; firm collapsed; platform sanctions"
+justifications:
+  base_risk: "Large-scale data misuse in elections"
+  irreversibility: "Data propagation & profiling persistent"
+  equity: "Unequal exposure across demographics"
+review_status: peer_reviewed
