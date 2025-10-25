@@ -1,0 +1,50 @@
+version: "1.1"
+provenance:
+  source: "DeepKang Labs Network Governance Committee (DL-NGC)"
+  rationale: "Mappings for Fiber (NESS-like) tensions → SIGMA"
+  last_review: "2025-10-25"
+
+aliases:
+  stakeholders:
+    "relay_nodes": "node_operators"
+    "end_users": "users"
+    "core_devs": "developers"
+
+mappings:
+  - mapping_id: consensus_latency_tradeoff
+    fiber_tension: "consensus_speed_vs_network_latency"
+    keywords: ["consensus","latency","fiber","blocktime","routing"]
+    sigma_dimensions: ["stability","resilience"]
+    derive_risk_linear:
+      short_term: "user_experience_impact"
+      long_term:  "technical_complexity"
+      irreversibility: "security_implications"
+      scale: 10.0
+    derive_risk:
+      short_term: "user_experience_impact/10"
+      long_term:  "technical_complexity/10"
+      irreversibility: "max(security_implications, technical_complexity)/10"
+    stakeholder_impact:
+      users: 0.7
+      node_operators: 0.7
+      developers: 0.6
+    rationale: "Faster consensus can degrade routing & recovery surfaces."
+
+  - mapping_id: privacy_observability_tradeoff
+    fiber_tension: "privacy_strength_vs_network_observability"
+    keywords: ["privacy","mix","obfuscation","observability","logging"]
+    sigma_dimensions: ["non_harm","stability"]
+    derive_risk_linear:
+      short_term: "security_implications"
+      long_term:  "user_experience_impact"
+      irreversibility: "technical_complexity"
+      scale: 10.0
+    derive_risk:
+      short_term: "security_implications/10"
+      long_term:  "user_experience_impact/10"
+      irreversibility: "technical_complexity/10"
+    stakeholder_impact:
+      users: 0.85
+      node_operators: 0.55
+      developers: 0.45
+    rationale: "Stronger privacy may reduce operational observability."
