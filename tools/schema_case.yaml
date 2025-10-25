@@ -1,0 +1,12 @@
+validation:
+  min_sources: 2
+  required_fields: [outcome, domain, impact_scale, parameters, sources]
+  allowed_status: [historical, ongoing_verified]
+  review_process: peer_reviewed
+
+fields:
+  parameters:
+    base_risk: float   # 0..1
+    irreversibility: float   # 0..1
+    equity_distribution: list  # [X,Y] with X+Y≈1
+    equity_gini: float   # 0..1
