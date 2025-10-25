@@ -1,0 +1,19 @@
+id: amazon_recruiting_2018
+name: "Amazon Resume Screening Tool"
+domain: employment
+status: historical
+impact_scale: company
+sources:
+  - "Reuters (2018) report"
+  - "Subsequent analyses of gender bias in ML hiring"
+parameters:
+  base_risk: 0.68
+  irreversibility: 0.70
+  equity_distribution: [0.30, 0.70]
+  equity_gini: 0.40
+outcome: "System reportedly scrapped after gender bias surfaced"
+justifications:
+  base_risk: "Hiring pipeline distortion"
+  irreversibility: "Lost opportunities hard to recover"
+  equity: "Women candidates disadvantaged in tech roles"
+review_status: peer_reviewed
