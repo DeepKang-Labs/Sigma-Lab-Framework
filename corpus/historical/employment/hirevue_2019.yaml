@@ -1,0 +1,19 @@
+id: hirevue_2019
+name: "HireVue Video Interview Analytics"
+domain: employment
+status: historical
+impact_scale: multinational
+sources:
+  - "EPIC complaint (2019)"
+  - "Press coverage & vendor statements"
+parameters:
+  base_risk: 0.65
+  irreversibility: 0.75
+  equity_distribution: [0.30, 0.70]
+  equity_gini: 0.40
+outcome: "Regulatory & public scrutiny; product changes announced"
+justifications:
+  base_risk: "Automated screening shaping access to jobs"
+  irreversibility: "Opportunity loss has durable effects"
+  equity: "Potential disparate impact across demographics"
+review_status: peer_reviewed
