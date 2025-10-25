@@ -1,0 +1,19 @@
+id: predpol_lapd_2019
+name: "PredPol Predictive Policing (LAPD)"
+domain: justice_policing
+status: historical
+impact_scale: city
+sources:
+  - "The Intercept (2020)"
+  - "UCLA study on predictive policing bias (2019)"
+parameters:
+  base_risk: 0.72
+  irreversibility: 0.80
+  equity_distribution: [0.20, 0.80]
+  equity_gini: 0.40
+outcome: "Program suspended after bias & oversight concerns"
+justifications:
+  base_risk: "Feedback loops & area targeting"
+  irreversibility: "Long-term stigma, records, trust erosion"
+  equity: "Minority neighborhoods over-targeted"
+review_status: peer_reviewed
