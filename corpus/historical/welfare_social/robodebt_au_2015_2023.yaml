@@ -1,0 +1,19 @@
+id: robodebt_au_2015_2023
+name: "Australia Robodebt Scheme"
+domain: welfare_social
+status: historical
+impact_scale: national
+sources:
+  - "Royal Commission (2023)"
+  - "Government/press reports 2015–2023"
+parameters:
+  base_risk: 0.85
+  irreversibility: 0.80
+  equity_distribution: [0.25, 0.75]
+  equity_gini: 0.50
+outcome: "Program unlawful; repayments; severe social harm"
+justifications:
+  base_risk: "Hundreds of thousands affected; severe harm"
+  irreversibility: "Financial/psychological damage; some deaths reported"
+  equity: "Concentrated impact on vulnerable recipients"
+review_status: peer_reviewed
