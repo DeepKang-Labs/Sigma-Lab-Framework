@@ -1,6 +1,7 @@
-# -*- coding: utf-8 -*-
-# ============================================================
-# Package Init — Network Bridge (Generic)
-# ============================================================
-
+"""
+Network Bridge package (Skywire & Fiber).
+MIT License — DeepKang Labs
+"""
 from .network_bridge import NetworkBridge  # re-export for convenience
+
+__all__ = ["NetworkBridge"]
