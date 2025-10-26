@@ -30,8 +30,25 @@ jobs:
         shell: bash
         run: |
           if [ ! -f discovery/decision_mapper.yaml ]; then
-            python -c "from pathlib import Path; Path('discovery').mkdir(parents=True, exist_ok=True); Path('discovery/decision_mapper.yaml').write_text('version: \"1.0\"\\ndiscovery_date: \"2025-10-25\"\\ndecision_points:\\n  - decision_id: \"dp_demo_ci\"\\n    description: \"CI demo decision for smoke\"\\n    stakeholders: [\"end_users\",\"core_devs\"]\\n    governance_dimensions:\\n      technical_complexity: 5\\n      economic_impact: 4\\n      user_experience_impact: 6\\n      security_implications: 3\\n    current_pain_level: 5\\n', encoding='utf-8')"
-            echo "Wrote discovery/decision_mapper.yaml"
+            python - <<'PY'
+from pathlib import Path
+content = """version: "1.0"
+discovery_date: "2025-10-25"
+decision_points:
+  - decision_id: "dp_demo_ci"
+    description: "CI demo decision for smoke"
+    stakeholders: ["end_users", "core_devs"]
+    governance_dimensions:
+      technical_complexity: 5
+      economic_impact: 4
+      user_experience_impact: 6
+      security_implications: 3
+      current_pain_level: 5
+"""
+Path("discovery").mkdir(parents=True, exist_ok=True)
+Path("discovery/decision_mapper.yaml").write_text(content, encoding="utf-8")
+print("Wrote discovery/decision_mapper.yaml")
+PY
           fi
 
       - name: Set PYTHONPATH
@@ -40,10 +57,9 @@ jobs:
       - name: Run unit tests (core + bridge)
         run: python -m pytest -q
 
-      # ---- Bridge validate-only (Skywire)
       - name: Bridge • validate-only (Skywire)
         run: |
-          python -m network_bridge.run_network_integrated \
+          PYTHONPATH=$PWD python -m network_bridge.run_network_integrated \
             --network skywire \
             --discovery ./discovery \
             --mappings ./network_bridge/mappings_skywire.yaml \
@@ -52,10 +68,9 @@ jobs:
             --validate-only \
             --formula-eval auto
 
-      # ---- Bridge validate-only (Fiber)
       - name: Bridge • validate-only (Fiber)
         run: |
-          python -m network_bridge.run_network_integrated \
+          PYTHONPATH=$PWD python -m network_bridge.run_network_integrated \
             --network fiber \
             --discovery ./discovery \
             --mappings ./network_bridge/mappings_fiber.yaml \
@@ -66,37 +81,11 @@ jobs:
 
       - name: Tools • mesh_memory_append
         run: |
-          set -e
-          MEM=./pilots/validation_logs/mesh_memory.jsonl
-
-          if [ -f ./pilots/validation_logs/skywire_validate_only.json ]; then
-            echo "[mesh] appending skywire report → $MEM"
-            python -m tools.mesh_memory_append \
-              --report ./pilots/validation_logs/skywire_validate_only.json \
-              --memory "$MEM"
-          else
-            echo "[mesh] no skywire report found, skipping"
-          fi
-
-          if [ -f ./pilots/validation_logs/fiber_validate_only.json ]; then
-            echo "[mesh] appending fiber report → $MEM"
-            python -m tools.mesh_memory_append \
-              --report ./pilots/validation_logs/fiber_validate_only.json \
-              --memory "$MEM"
-          else
-            echo "[mesh] no fiber report found, skipping"
-          fi
+          PYTHONPATH=$PWD python -m tools.mesh_memory_append \
+            --report ./pilots/validation_logs/mesh_memory_report.json
 
       - name: Tools • priority_matrix_from_mappings
         run: |
-          if [ -f ./network_bridge/mappings_skywire.yaml ]; then
-            python -m tools.priority_matrix_from_mappings \
-              --mappings ./network_bridge/mappings_skywire.yaml \
-              --out ./pilots/validation_logs/priority_matrix_skywire.csv
-          fi
-
-          if [ -f ./network_bridge/mappings_fiber.yaml ]; then
-            python -m tools.priority_matrix_from_mappings \
-              --mappings ./network_bridge/mappings_fiber.yaml \
-              --out ./pilots/validation_logs/priority_matrix_fiber.csv
-          fi
+          PYTHONPATH=$PWD python -m tools.priority_matrix_from_mappings \
+            --mappings ./network_bridge/mappings_skywire.yaml \
+            --out ./pilots/validation_logs/priority_matrix_report.json
