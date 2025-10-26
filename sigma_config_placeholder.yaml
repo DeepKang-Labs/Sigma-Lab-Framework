@@ -1,0 +1,15 @@
+provenance:
+  source: "DeepKang Labs"
+  rationale: "Placeholder config for bridge validation"
+weights:
+  values:
+    non_harm: 0.35
+    stability: 0.30
+    resilience: 0.20
+    equity: 0.15
+thresholds:
+  values:
+    non_harm_floor: 0.35
+    veto_irreversibility: 0.70
+mode: "PROFILE_ONLY"
+license: "MIT"
