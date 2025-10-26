@@ -28,20 +28,23 @@ jobs:
           mkdir -p discovery
 
       - name: Create demo discovery data (safe fallback)
+        shell: bash
         run: |
           if [ ! -f discovery/decision_mapper.yaml ]; then
-            echo "version: '1.0'
-discovery_date: '2025-10-25'
+            cat > discovery/decision_mapper.yaml <<'YAML'
+version: "1.0"
+discovery_date: "2025-10-25"
 decision_points:
-  - decision_id: 'dp_demo_ci'
-    description: 'CI demo decision for smoke'
-    stakeholders: ['end_users','core_devs']
+  - decision_id: "dp_demo_ci"
+    description: "CI demo decision for smoke"
+    stakeholders: ["end_users","core_devs"]
     governance_dimensions:
       technical_complexity: 5
       economic_impact: 4
       user_experience_impact: 6
       security_implications: 3
-    current_pain_level: 5" > discovery/decision_mapper.yaml
+    current_pain_level: 5
+YAML
           fi
 
       - name: Set PYTHONPATH
