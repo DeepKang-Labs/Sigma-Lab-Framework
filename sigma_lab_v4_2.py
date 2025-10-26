@@ -17,7 +17,7 @@ import random
 
 def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     try:
-        return max(lo, min(hi, float(x))))
+        return max(lo, min(hi, float(x)))
     except Exception:
         return 0.0
 
