@@ -1,16 +1,14 @@
 name: nightly
-
 on:
   schedule:
-    - cron: "0 2 * * *"   # Run every day at 02:00 UTC
+    - cron: '0 3 * * *' # Run every night at 3 AM UTC
   workflow_dispatch:
 
 jobs:
-  nightly:
+  nightly-validation:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -80,20 +78,6 @@ YAML
       - name: Tools • mesh_memory_append
         run: |
           python -m tools.mesh_memory_append \
-            --input ./pilots/validation_logs \
-            --output ./pilots/validation_logs/mesh_memory.jsonl
-
-      - name: Tools • priority_matrix_from_discovery
-        run: |
-          python -m tools.priority_matrix_from_discovery \
-            --discovery ./discovery/decision_mapper.yaml \
-            --output ./pilots/validation_logs/priority_matrix.csv
-
-      - name: Upload nightly artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-artifacts
-          path: |
-            pilots/validation_logs/*.json
-            pilots/validation_logs/*.jsonl
-            pilots/validation_logs/*.csv
+            --inputs ./pilots/validation_logs/skywire_validate_only.json \
+                     ./pilots/validation_logs/fiber_validate_only.json \
+            --output ./pilots/validation_logs/mesh_memory.json
