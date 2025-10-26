@@ -1,61 +1,26 @@
 #!/usr/bin/env python3
 # ============================================================
-# Runner — Network Bridge (Generic) + Prioritization + Mesh Memory
+# Runner — Network Bridge (Generic)
+# Robust import strategy for CI and direct execution
 # ============================================================
 
-import os, sys, json, argparse, yaml, csv, statistics
-from typing import Dict, Any, List, Optional
+import os
+import sys
+import json
+import argparse
+import yaml
 
-from network_bridge.network_bridge import NetworkBridge
+# --- Robust import: try absolute, then local fallback ---
+try:
+    # Preferred: package import (works when network_bridge is a package)
+    from network_bridge.network_bridge import NetworkBridge
+except Exception:
+    # Fallback: add this script's folder to sys.path and import the module file
+    THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+    if THIS_DIR not in sys.path:
+        sys.path.insert(0, THIS_DIR)
+    from network_bridge import NetworkBridge  # type: ignore
 
-# ---------- Priority Scoring (pain × impact × frequency) ----------
-
-def _extract_gd(dp: Dict[str, Any]) -> Dict[str, float]:
-    gd = dp.get("governance_dimensions", {})
-    return {
-        "technical_complexity": float(gd.get("technical_complexity", 0) or 0),
-        "economic_impact": float(gd.get("economic_impact", 0) or 0),
-        "user_experience_impact": float(gd.get("user_experience_impact", 0) or 0),
-        "security_implications": float(gd.get("security_implications", 0) or 0),
-    }
-
-def _priority_score(dp: Dict[str, Any]) -> float:
-    # Pain ∈ [0..10], Impact = mean(economic, ux, security) ∈ [0..10], Freq ∈ [0..10]
-    pain = float(dp.get("current_pain_level", 0) or 0)
-    freq = float(dp.get("decision_frequency", 5) or 5)  # default mid if absent
-    gd = _extract_gd(dp)
-    impact = statistics.fmean([
-        gd["economic_impact"],
-        gd["user_experience_impact"],
-        gd["security_implications"]
-    ])
-    # Normalize to [0..1] for each component, then multiply
-    return (pain/10.0) * (impact/10.0) * (freq/10.0)
-
-def write_priority_matrix(discovery: Dict[str, Any], out_csv: str) -> None:
-    os.makedirs(os.path.dirname(out_csv), exist_ok=True)
-    rows = []
-    for dp in discovery.get("decision_points", []):
-        score = _priority_score(dp)
-        rows.append({
-            "decision_id": dp.get("decision_id",""),
-            "description": dp.get("description",""),
-            "pain": dp.get("current_pain_level", ""),
-            "freq": dp.get("decision_frequency", ""),
-            "impact_econ": _extract_gd(dp)["economic_impact"],
-            "impact_ux": _extract_gd(dp)["user_experience_impact"],
-            "impact_sec": _extract_gd(dp)["security_implications"],
-            "priority_score": round(score, 4),
-        })
-    rows.sort(key=lambda r: r["priority_score"], reverse=True)
-    with open(out_csv, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else
-                           ["decision_id","description","pain","freq","impact_econ","impact_ux","impact_sec","priority_score"])
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
-
-# ---------- Benchmark helper ----------
 
 def _benchmark_compare(results, baseline):
     dims = ["non_harm", "stability", "resilience", "equity"]
@@ -67,6 +32,7 @@ def _benchmark_compare(results, baseline):
     delta = {d: round(avg[d] - float(base.get(d, 0.0)), 3) for d in dims}
     return {"average_scores": avg, "baseline": base, "delta": delta}
 
+
 def _demo_results(contexts):
     out = []
     for _ in contexts:
@@ -77,11 +43,10 @@ def _demo_results(contexts):
         })
     return out
 
-# ---------- Main ----------
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--network", choices=["skywire","fiber"], default="skywire")
+    ap.add_argument("--network", choices=["skywire", "fiber"], default="skywire")
     ap.add_argument("--discovery", type=str, default="./discovery")
     ap.add_argument("--config", type=str, default="./sigma_config_placeholder.yaml")
     ap.add_argument("--mappings", type=str, required=True)
@@ -91,10 +56,6 @@ def main():
     ap.add_argument("--validate-only", action="store_true")
     ap.add_argument("--formula-eval", choices=["auto","linear","simple"], default="auto")
     ap.add_argument("--pretty", action="store_true")
-    # NEW:
-    ap.add_argument("--priority-csv", type=str, default="./pilots/validation_logs/governance_priority_matrix.csv")
-    ap.add_argument("--mesh-memory-root", type=str, default="./corpus/mesh_memory")
-    ap.add_argument("--no-memory", action="store_true", help="Disable mesh memory append")
     args = ap.parse_args()
 
     print(f"🚀 Network Bridge ({args.network}) — validate_only={args.validate_only} mode")
@@ -117,12 +78,6 @@ def main():
         print(f"   ⚠️  {w}")
     print(f"   → {len(discovery_data.get('decision_points', []))} decision(s) found")
 
-    # 1.b) Prioritization Engine (always compute)
-    print("1.b) Prioritization Engine → CSV")
-    write_priority_matrix(discovery_data, args.priority_csv)
-    print(f"   → priority matrix saved to {args.priority_csv}")
-
-    # Validate-only short path
     if args.validate_only:
         contexts = bridge.transform_to_sigma_contexts(discovery_data)
         print(f"   → {len(contexts)} SIGMA context(s) generated (validate-only).")
@@ -131,29 +86,6 @@ def main():
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2 if args.pretty else None, ensure_ascii=False)
         print(f"✅ Validate-only report saved → {args.out}")
-
-        # Mesh Memory (validate mode = profile only)
-        if not args.no_memory:
-            try:
-                from tools.mesh_memory import append_memory_entry
-                dims = ["non_harm","stability","resilience","equity"]
-                # demo summary for validate-only
-                sigma_summary = {d: 0.6 for d in dims}
-                decision_ids = [dp.get("decision_id","unknown") for dp in discovery_data.get("decision_points",[])]
-                idx_path = append_memory_entry(
-                    args.mesh_memory_root,
-                    network=args.network,
-                    decision_ids=decision_ids,
-                    report_path=args.out,
-                    mappings_path=args.mappings,
-                    config_path=args.config,
-                    discovery_path=os.path.join(args.discovery,"decision_mapper.yaml"),
-                    sigma_summary=sigma_summary,
-                    extra_meta={"mode":"validate-only"}
-                )
-                print(f"   ↳ mesh memory appended: {idx_path}")
-            except Exception as e:
-                print(f"   ⚠️ mesh memory append failed: {e}")
         return
 
     # 2) Transform → SIGMA contexts
@@ -211,30 +143,8 @@ def main():
         json.dump(report, f, indent=2 if args.pretty else None, ensure_ascii=False)
     print(f"✅ Done. Report saved → {args.out}")
 
-    # 6) Mesh Memory append (real run)
-    if not args.no_memory:
-        try:
-            from tools.mesh_memory import append_memory_entry
-            dims = ["non_harm","stability","resilience","equity"]
-            if sigma_results:
-                avg = {d: sum(r.get("scores",{}).get(d,0.0) for r in sigma_results)/len(sigma_results) for d in dims}
-            else:
-                avg = {d: 0.0 for d in dims}
-            decision_ids = [dp.get("decision_id","unknown") for dp in discovery_data.get("decision_points",[])]
-            idx_path = append_memory_entry(
-                args.mesh_memory_root,
-                network=args.network,
-                decision_ids=decision_ids,
-                report_path=args.out,
-                mappings_path=args.mappings,
-                config_path=args.config,
-                discovery_path=os.path.join(args.discovery,"decision_mapper.yaml"),
-                sigma_summary=avg,
-                extra_meta={"mode":"full-run"}
-            )
-            print(f"   ↳ mesh memory appended: {idx_path}")
-        except Exception as e:
-            print(f"   ⚠️ mesh memory append failed: {e}")
 
 if __name__ == "__main__":
+    # Support execution as a script: python network_bridge/run_network_integrated.py ...
+    # Also works as module: python -m network_bridge.run_network_integrated ...
     main()
