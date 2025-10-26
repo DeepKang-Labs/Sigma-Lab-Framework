@@ -2,18 +2,22 @@
 # ===============================================================
 # SIGMA-LAB v4.2.1 — Procedural Diagnostic Framework (stable)
 # Authors: AI Kang (DeepKang-Labs) & Yuri Kang
-# License : MIT License (open-source, educational, and ethical use permitted)
+# License: MIT
 # ===============================================================
 
 from __future__ import annotations
-from dataclasses import dataclass, field, replace
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime, timezone
+
 import argparse
+import hashlib
 import json
 import math
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import unittest
+
 
 # ===============================================================
 # UTILITIES
@@ -22,8 +26,14 @@ import unittest
 def clip01(x: float) -> float:
     return float(max(0.0, min(1.0, x)))
 
+
 def safe_mean(xs: List[float]) -> float:
     return float(np.mean(xs)) if xs else 0.0
+
+
+def _md5_of_str(s: str) -> str:
+    return hashlib.md5(s.encode("utf-8")).hexdigest()
+
 
 # ===============================================================
 # PROVENANCE
@@ -34,6 +44,7 @@ class Provenance:
     source: str
     doc_ref: Optional[str] = None
     rationale: Optional[str] = None
+
 
 # ===============================================================
 # VALUE FUNCTIONS
@@ -58,7 +69,6 @@ class ValueFunction:
             return x
         elif k == "exp":
             a = float(self.params.get("a", 3.0))
-            # robust, monotonic, bounded in [0,1)
             return clip01(1.0 - math.exp(-a * x))
         elif k == "logistic":
             k_ = float(self.params.get("k", 12.0))
@@ -70,6 +80,7 @@ class ValueFunction:
             xs, ys = zip(*pts)
             return float(np.interp(x, xs, ys))
         return x
+
 
 # ===============================================================
 # ETHICAL WEIGHTS
@@ -90,10 +101,9 @@ class EthicalWeights:
             max(0.0, float(self.resilience)),
             max(0.0, float(self.equity)),
         ], dtype=float)
-        v = np.abs(v)  # guard against negative entries
+        v = np.abs(v)
         s = float(v.sum())
         if s < 1e-12:
-            # uniform fallback
             return {"non_harm": 0.25, "stability": 0.25, "resilience": 0.25, "equity": 0.25}
         return {
             "non_harm": float(v[0] / s),
@@ -101,6 +111,7 @@ class EthicalWeights:
             "resilience": float(v[2] / s),
             "equity": float(v[3] / s),
         }
+
 
 # ===============================================================
 # THRESHOLDS & GUARDRAILS (minimal in 4.2.1)
@@ -112,11 +123,13 @@ class Thresholds:
     veto_irreversibility: float = 0.7
     provenance: Optional[Provenance] = None
 
+
 @dataclass
 class Guardrails:
     max_parameter_adjustment: float = 0.3  # unused sentinel in 4.2.1 (kept for compatibility)
     policy_lock: bool = False              # unused in 4.2.1
     require_cross_validation: bool = False # unused in 4.2.1
+
 
 # ===============================================================
 # RISK MODELS
@@ -134,17 +147,20 @@ class HarmModel:
                       "base_risk aggregated via max/mean/weighted (configurable).")
     provenance: Optional[Provenance] = None
 
+
 @dataclass
 class StabilityModel:
     mean_weight: float = 0.6
     max_weight: float = 0.4
     provenance: Optional[Provenance] = None
 
+
 @dataclass
 class ResilienceModel:
     avg_weight: float = 0.85
     breadth_weight: float = 0.15
     provenance: Optional[Provenance] = None
+
 
 # ===============================================================
 # CONTEXT DATA
@@ -157,23 +173,45 @@ class Stakeholder:
     impact_benefit: float = 0.0 # 0..1
     weight: float = 1.0
 
+
 @dataclass
 class Uncertainty:
     short_term_risk: Tuple[float, float] = (0.0, 1.0)
     long_term_risk: Tuple[float, float] = (0.0, 1.0)
     irreversibility: Tuple[float, float] = (0.0, 1.0)
 
+
 @dataclass
 class OptionContext:
+    """
+    Tolerant context:
+      - risks can be None (validated later, not at init)
+      - stakeholders can be Stakeholder or str (auto-normalized to neutral Stakeholder)
+    """
     name: str
-    short_term_risk: float
-    long_term_risk: float
-    irreversibility_risk: float
-    stakeholders: List[Stakeholder]
+    short_term_risk: Optional[float] = None
+    long_term_risk: Optional[float] = None
+    irreversibility_risk: Optional[float] = 0.0
+    stakeholders: List[Union[Stakeholder, str]] = field(default_factory=list)
     stability_risks: Dict[str, float] = field(default_factory=dict)
     resilience_features: Dict[str, float] = field(default_factory=dict)
     uncertainty: Optional[Uncertainty] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        normed: List[Stakeholder] = []
+        for s in self.stakeholders:
+            if isinstance(s, Stakeholder):
+                normed.append(s)
+            else:
+                normed.append(Stakeholder(
+                    name=str(s),
+                    vulnerability=0.5,
+                    impact_benefit=0.5,
+                    weight=1.0
+                ))
+        self.stakeholders = normed
+
 
 # ===============================================================
 # CONFIG
@@ -194,6 +232,7 @@ class SigmaConfig:
         "equity": ValueFunction("linear"),
     })
     verdict_acceptance_threshold: float = 0.65
+
 
 # ===============================================================
 # EQUITY METRICS
@@ -216,6 +255,7 @@ def gini_coefficient(x: List[float]) -> float:
     g = (2.0 * float(np.sum(i * a_sorted)) / (n * S)) - (n + 1.0) / n
     return clip01(abs(g))
 
+
 # ===============================================================
 # ENGINE
 # ===============================================================
@@ -227,21 +267,28 @@ class SigmaLab:
     Returns transparent diagnostics; no moral truth claim.
     """
 
-    # ---------- VALIDATION ----------
-
     def __init__(self, cfg: SigmaConfig):
         self.cfg = cfg
 
+    # ---------- VALIDATION ----------
+
     def validate_context(self, ctx: OptionContext) -> List[str]:
         errs: List[str] = []
-        # main risks
+        # main risks (tolerate None -> report as input error)
         for name, value in [
             ("short_term_risk", ctx.short_term_risk),
             ("long_term_risk", ctx.long_term_risk),
             ("irreversibility_risk", ctx.irreversibility_risk),
         ]:
-            if not (0.0 <= value <= 1.0):
-                errs.append(f"{name} out of [0,1]: {value}")
+            if value is None:
+                errs.append(f"{name} is None (expected [0,1])")
+            else:
+                try:
+                    v = float(value)
+                    if not (0.0 <= v <= 1.0):
+                        errs.append(f"{name} out of [0,1]: {value}")
+                except Exception:
+                    errs.append(f"{name} not a number: {value}")
 
         # stakeholders
         if not ctx.stakeholders:
@@ -255,7 +302,7 @@ class SigmaLab:
                 if s.weight < 0:
                     errs.append(f"Stakeholder '{s.name}' weight must be >= 0")
 
-        # uncertainty ranges
+        # uncertainty ranges (if provided)
         if ctx.uncertainty:
             ranges = [
                 ("short_term_risk", ctx.uncertainty.short_term_risk),
@@ -263,7 +310,12 @@ class SigmaLab:
                 ("irreversibility", ctx.uncertainty.irreversibility),
             ]
             for name, (lo, hi) in ranges:
-                if not (0.0 <= lo <= hi <= 1.0):
+                try:
+                    lo_f = float(lo)
+                    hi_f = float(hi)
+                    if not (0.0 <= lo_f <= hi_f <= 1.0):
+                        errs.append(f"Uncertainty interval invalid for {name}: [{lo}, {hi}]")
+                except Exception:
                     errs.append(f"Uncertainty interval invalid for {name}: [{lo}, {hi}]")
 
         return errs
@@ -298,11 +350,10 @@ class SigmaLab:
 
     def _eval_non_harm(self, ctx: OptionContext) -> Tuple[float, Dict[str, Any]]:
         hm = self.cfg.harm_model
-        base_risk = self._aggregate_base_risk(
-            clip01(ctx.short_term_risk),
-            clip01(ctx.long_term_risk)
-        )
-        irr = clip01(ctx.irreversibility_risk)
+        st = clip01(ctx.short_term_risk if ctx.short_term_risk is not None else 0.0)
+        lt = clip01(ctx.long_term_risk if ctx.long_term_risk is not None else 0.0)
+        base_risk = self._aggregate_base_risk(st, lt)
+        irr = clip01(ctx.irreversibility_risk if ctx.irreversibility_risk is not None else 0.0)
         factor = clip01(hm.base_weight + hm.irreversibility_weight * irr)
         expected_harm = clip01(base_risk * factor)
         score = clip01(1.0 - expected_harm)
@@ -381,8 +432,9 @@ class SigmaLab:
         th = self.cfg.thresholds
         if scores["non_harm"] < th.non_harm_floor:
             vetoes.append(f"non-harm floor violated ({scores['non_harm']:.2f} < {th.non_harm_floor:.2f})")
-        if clip01(ctx.irreversibility_risk) > th.veto_irreversibility:
-            vetoes.append(f"irreversibility veto ({ctx.irreversibility_risk:.2f} > {th.veto_irreversibility:.2f})")
+        irr_risk = clip01(ctx.irreversibility_risk if ctx.irreversibility_risk is not None else 0.0)
+        if irr_risk > th.veto_irreversibility:
+            vetoes.append(f"irreversibility veto ({irr_risk:.2f} > {th.veto_irreversibility:.2f})")
 
         verdict = None
         if verdict_opt_in:
@@ -409,6 +461,35 @@ class SigmaLab:
                 "verdict_threshold": self.cfg.verdict_acceptance_threshold
             }
         }
+
+    # ---------- AUDIT TRAIL ----------
+
+    def export_audit_trail(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Minimal audit trail:
+          - version tag
+          - UTC timestamp
+          - config fingerprint
+          - result fingerprint
+        """
+        cfg_blob = {
+            "weights": self.cfg.weights.__dict__,
+            "thresholds": self.cfg.thresholds.__dict__,
+            "harm_model": {k: v for k, v in self.cfg.harm_model.__dict__.items() if not k.startswith("_")},
+            "stability_model": self.cfg.stability_model.__dict__,
+            "resilience_model": self.cfg.resilience_model.__dict__,
+            "verdict_threshold": self.cfg.verdict_acceptance_threshold,
+        }
+        cfg_json = json.dumps(cfg_blob, sort_keys=True, ensure_ascii=False)
+        res_json = json.dumps(result, sort_keys=True, ensure_ascii=False) if result else "{}"
+
+        return {
+            "version": "v4.2.1",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "config_md5": _md5_of_str(cfg_json),
+            "result_md5": _md5_of_str(res_json),
+        }
+
 
 # ===============================================================
 # DEMOS
@@ -512,8 +593,9 @@ def demo_context(domain: str) -> Tuple[SigmaConfig, OptionContext]:
     )
     return cfg, ctx
 
+
 # ===============================================================
-# UNIT TESTS (embedded)
+# UNIT TESTS (embedded minimal)
 # ===============================================================
 
 class SigmaTests(unittest.TestCase):
@@ -536,7 +618,7 @@ class SigmaTests(unittest.TestCase):
     def test_value_function_exp(self):
         vf = ValueFunction("exp", {"a": 5.0})
         self.assertAlmostEqual(vf(0.0), 0.0, places=6)
-        self.assertTrue(0.6 < vf(0.2) < 1.0)  # monotonic & bounded
+        self.assertTrue(0.6 < vf(0.2) < 1.0)
         self.assertTrue(vf(1.0) <= 1.0)
 
     def test_gini(self):
@@ -545,12 +627,23 @@ class SigmaTests(unittest.TestCase):
         self.assertAlmostEqual(g0, 0.0, places=6)
         self.assertTrue(0.7 <= g1 <= 1.0)
 
+    def test_audit_trail_exists(self):
+        cfg, ctx = demo_context("public")
+        eng = SigmaLab(cfg)
+        r = eng.diagnose(ctx)
+        trail = eng.export_audit_trail(r)
+        self.assertIn("config_md5", trail)
+        self.assertIn("result_md5", trail)
+        self.assertIn("timestamp", trail)
+
+
 # ===============================================================
 # CLI
 # ===============================================================
 
 def _pretty(obj: Any, pretty: bool) -> str:
     return json.dumps(obj, indent=2 if pretty else None, ensure_ascii=False)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SIGMA-LAB v4.2.1 — Procedural Diagnostic Framework")
