@@ -1,86 +1,100 @@
 #!/usr/bin/env python3
-# Priority Matrix from Discovery
-# Builds a CSV ranking: score = pain * impact * frequency
-# - pain: current_pain_level (0..10) or 5 if missing
-# - impact: mean(technical_complexity, economic_impact, user_experience_impact) on 0..10
-# - frequency: decision_frequency (0..10) or 5 if missing
-# All normalized to 0..1 by /10, then multiplied.
-# Usage:
-#   python tools/priority_matrix_from_discovery.py \
-#       --in discovery/decision_mapper.yaml \
-#       --out pilots/validation_logs/governance_priority_matrix.csv
+"""
+priority_matrix_from_mappings.py
+--------------------------------
+Reads a YAML mapping file (e.g. network_bridge/mappings_skywire.yaml)
+and exports a flat CSV governance priority matrix.
+
+This helps quantify and compare decision points using metrics such as:
+- technical_complexity
+- economic_impact
+- user_experience_impact
+- security_implications
+- current_pain_level
+
+Usage:
+    python -m tools.priority_matrix_from_mappings \
+        --mappings ./network_bridge/mappings_skywire.yaml \
+        --out ./pilots/validation_logs/priority_matrix.csv
+"""
 
 import argparse
 import csv
-import math
-import os
-import sys
-from typing import Any, Dict, List
 import yaml
+from pathlib import Path
 
-def clip01(x: float) -> float:
-    return max(0.0, min(1.0, float(x)))
 
-def read_yaml(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate a governance priority matrix from a mappings YAML file."
+    )
+    parser.add_argument(
+        "--mappings", required=True,
+        help="Path to the mappings YAML file (e.g. network_bridge/mappings_skywire.yaml)"
+    )
+    parser.add_argument(
+        "--out", default="./priority_matrix.csv",
+        help="Output CSV file path (default: ./priority_matrix.csv)"
+    )
+    return parser.parse_args()
 
-def get_impact(gd: Dict[str, Any]) -> float:
-    vals = []
-    for k in ["technical_complexity", "economic_impact", "user_experience_impact"]:
-        v = gd.get(k, None)
-        if isinstance(v, (int, float)):
-            vals.append(v)
-    if not vals:
-        return 0.5
-    return sum(vals) / len(vals)
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="inp", required=True, help="Discovery YAML path")
-    ap.add_argument("--out", dest="out", required=True, help="Output CSV path")
-    args = ap.parse_args()
+    args = parse_args()
+    yaml_path = Path(args.mappings)
+    out_path = Path(args.out)
 
-    data = read_yaml(args.inp)
-    dps: List[Dict[str, Any]] = data.get("decision_points", []) or []
-    rows = []
+    # Ensure output directory exists
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    for dp in dps:
-        did = dp.get("decision_id", "unknown")
-        desc = dp.get("description", "")
-        gd = dp.get("governance_dimensions", {}) or {}
-        pain = dp.get("current_pain_level", 5)
-        freq = dp.get("decision_frequency", 5)
+    if not yaml_path.exists():
+        print(f"[WARN] Mappings file not found: {yaml_path}")
+        return 1
 
-        pain_n = clip01(float(pain) / 10.0)
-        impact_n = clip01(float(get_impact(gd)) / 10.0)
-        freq_n = clip01(float(freq) / 10.0)
+    try:
+        with open(yaml_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"[ERROR] Failed to parse YAML: {e}")
+        return 2
 
-        score = round(pain_n * impact_n * freq_n, 6)
+    # Support both top-level list and discovery-like structure
+    entries = data if isinstance(data, list) else data.get("decision_points", [])
+    if not entries:
+        print(f"[WARN] No decision points found in {yaml_path}")
+        return 0
 
-        rows.append({
-            "decision_id": did,
-            "description": desc,
-            "pain": pain,
-            "impact_avg": round(get_impact(gd), 3),
-            "frequency": freq,
-            "score": score
-        })
+    # Define CSV schema
+    fields = [
+        "decision_id",
+        "description",
+        "technical_complexity",
+        "economic_impact",
+        "user_experience_impact",
+        "security_implications",
+        "current_pain_level",
+    ]
 
-    # Sort by score desc
-    rows.sort(key=lambda r: r["score"], reverse=True)
+    # Write CSV
+    with open(out_path, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fields)
+        writer.writeheader()
 
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["decision_id","description","pain","impact_avg","frequency","score"])
-        w.writeheader()
-        for r in rows:
-            w.writerow(r)
+        for entry in entries:
+            gd = entry.get("governance_dimensions", {})
+            writer.writerow({
+                "decision_id": entry.get("decision_id", ""),
+                "description": entry.get("description", ""),
+                "technical_complexity": gd.get("technical_complexity", ""),
+                "economic_impact": gd.get("economic_impact", ""),
+                "user_experience_impact": gd.get("user_experience_impact", ""),
+                "security_implications": gd.get("security_implications", ""),
+                "current_pain_level": gd.get("current_pain_level", ""),
+            })
 
-    print(f"Wrote priority matrix → {args.out}")
-    if rows:
-        top = rows[0]
-        print(f"Top: {top['decision_id']} (score={top['score']})")
+    print(f"[OK] Priority matrix written → {out_path.resolve()}")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
