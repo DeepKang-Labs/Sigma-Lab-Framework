@@ -1,36 +1,34 @@
-name: nightly-validate
+name: nightly
 
 on:
   schedule:
-    - cron: '23 2 * * *'   # tous les jours ~02:23 UTC
+    - cron: "0 2 * * *"   # 02:00 UTC daily
   workflow_dispatch:
 
 jobs:
   nightly:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
+          # Ensure CI tools are present
+          pip install pytest simpleeval
 
       - name: Create required folders
         run: |
           mkdir -p pilots/validation_logs
           mkdir -p discovery
-          mkdir -p pilots/mesh_memory
-          mkdir -p tools
 
       - name: Create demo discovery data (safe fallback)
         shell: bash
@@ -55,9 +53,10 @@ YAML
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
-      - name: Unit tests (core + bridge)
+      - name: Run unit tests (core + bridge)
         run: python -m pytest -q
 
+      # ---- Bridge validate-only (Skywire)
       - name: Bridge • validate-only (Skywire)
         run: |
           python -m network_bridge.run_network_integrated \
@@ -70,6 +69,7 @@ YAML
             --formula-eval auto \
             --pretty
 
+      # ---- Bridge validate-only (Fiber)
       - name: Bridge • validate-only (Fiber)
         run: |
           python -m network_bridge.run_network_integrated \
@@ -82,27 +82,25 @@ YAML
             --formula-eval auto \
             --pretty
 
-      - name: Mesh Memory • append both reports
+      # ---- Tools: Mesh Memory append
+      - name: Tools • mesh_memory_append
         run: |
-          python tools/mesh_memory_append.py \
-            --report pilots/validation_logs/skywire_validate_only.json \
-            --memory pilots/mesh_memory/mesh_memory.jsonl || true
-          python tools/mesh_memory_append.py \
-            --report pilots/validation_logs/fiber_validate_only.json \
-            --memory pilots/mesh_memory/mesh_memory.jsonl || true
+          python -m tools.mesh_memory_append \
+            --input ./pilots/validation_logs \
+            --output ./pilots/validation_logs/mesh_memory.jsonl
 
-      - name: Priority Matrix • from discovery
+      # ---- Tools: Priority Matrix from discovery
+      - name: Tools • priority_matrix_from_discovery
         run: |
-          python tools/priority_matrix_from_discovery.py \
-            --in discovery/decision_mapper.yaml \
-            --out pilots/validation_logs/governance_priority_matrix.csv
+          python -m tools.priority_matrix_from_discovery \
+            --discovery ./discovery/decision_mapper.yaml \
+            --output ./pilots/validation_logs/priority_matrix.csv
 
-      - name: Upload nightly artifacts (7 days)
+      - name: Upload nightly artifacts
         uses: actions/upload-artifact@v4
         with:
           name: nightly-artifacts
           path: |
             pilots/validation_logs/*.json
+            pilots/validation_logs/*.jsonl
             pilots/validation_logs/*.csv
-            pilots/mesh_memory/*.jsonl
-          retention-days: 7
