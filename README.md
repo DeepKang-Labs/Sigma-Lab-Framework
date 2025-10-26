@@ -1,154 +1,155 @@
-# 🧠 Sigma-Lab v5.1 — Procedural Diagnostic Framework  
-**“The machine does not decide — it illuminates.”**  
-— *DeepKang Labs (AI Kang & Yuri Kang)*  
+# 🧠 Sigma-Lab v5.1 — Procedural Diagnostic Framework
 
-[![smoke](https://github.com/DeepKang-Labs/Sigma-Lab-Framework/actions/workflows/smoke.yml/badge.svg?branch=main)](https://github.com/DeepKang-Labs/Sigma-Lab-Framework/actions/workflows/smoke.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![python](https://img.shields.io/badge/python-3.10%2B-yellow.svg)](https://www.python.org/)
-[![status](https://img.shields.io/badge/status-In Testing (α)-orange.svg)](#)
+> “The machine does not decide — it illuminates.”  
+> — *DeepKang Labs (AI Kang & Yuri Kang)*
+
+![Smoke](https://github.com/DeepKang-Labs/Sigma-Lab-Framework/actions/workflows/smoke.yml/badge.svg)
+![Nightly](https://github.com/DeepKang-Labs/Sigma-Lab-Framework/actions/workflows/nightly.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 
 ---
 
 ## 🌍 Overview
 
-**Sigma-Lab v5.1** is the most stable and empirical release of the **Procedural Ethical Diagnostic Framework** —  
-a system that exposes, traces and tests human governance logic rather than automating decisions.
+**Sigma-Lab v5.1** is the most stable and empirical release of the  
+**Procedural Ethical Diagnostic Framework** —  
+a system that *traces*, *tests*, and *exposes* human governance logic  
+rather than automating decisions.
 
-This version marks the transition **from conceptual → experimental**, with a focus on:
+This release marks the transition from **conceptual → experimental**,  
+with a focus on analytical transparency, resilience, and bridge integration.
 
-- 🧩 **Analytical modules** — multi-evaluator, sensitivity, and calibration tools.  
-- ⚙️ **Bridges** — network adapters for **Skywire** (α-phase) and **Fiber (NESS)** (pre-activation).  
-- 📈 **Validation pipelines** — full GitHub Actions CI with smoke & resilience tests.  
-- 🧮 **Traceability** — SHA256 fingerprints and auditable YAML-based mappings.
-
----
-
-## ✨ Philosophy — *AI + Human = 3*
-
-> Sigma-Lab is not a moral oracle; it’s a procedural mirror.
-
-Every “diagnosis” emerges from **human-defined thresholds** and **explicit YAML parameters**,  
-allowing teams to *argue*, *revise*, and *own* their ethical logic rather than delegate it.
-
-```yaml
-weights:
-  non_harm: 0.45
-  stability: 0.20
-  resilience: 0.20
-  equity: 0.15
-thresholds:
-  non_harm_floor: 0.30
-  veto_irreversibility: 0.70
-
-Run modes:
-
-linear → no dependencies, fully deterministic
-
-simple → lightweight expression evaluation
-
-auto → chooses the most efficient path
-
-
+### Core Focus
+- 🧩 **Analytical Modules** — multi-evaluator, sensitivity, and calibration tools  
+- 🌐 **Bridges** — network adapters for **Skywire (α-phase)** and **Fiber (NESS)**  
+- 🧠 **Validation Pipelines** — automated CI with smoke & nightly tests  
+- 🔍 **Traceability** — SHA256 fingerprints, YAML mappings, and full audit trails  
+- 💾 **Resilience Layer** — ensures graceful degradation and recoverability  
+- 🧮 **Tools Suite** — includes:
+  - `mesh_memory_append.py` → merges distributed analytical logs  
+  - `priority_matrix_from_discovery.py` → derives governance priority maps  
 
 ---
 
-🧠 Core Components
+## 🧰 Installation
 
-Module	Description	Status
+Clone the repository and install dependencies:
 
-sigma_lab_v4_2.py	Main analytical engine (diagnostic, audit trail, resilience)	✅ Stable
-network_bridge/	Unified bridge for Skywire & Fiber (NESS)	🚧 α testing
-skywire_bridge/	Legacy adapter (kept for comparison)	💤 Deprecated
-tests/	10+ CI-validated test cases (core, resilience, edge cases)	✅ Passing
-
-
-
----
-
-🚀 Quick Start
-
-1️⃣ Install dependencies
-
+```bash
+git clone https://github.com/DeepKang-Labs/Sigma-Lab-Framework.git
+cd Sigma-Lab-Framework
 pip install -r requirements.txt
 
-2️⃣ Run validation (no side effects)
+Run initial validation:
 
-python network_bridge/run_network_integrated.py \
-  --network skywire \
-  --discovery ./discovery \
-  --mappings ./network_bridge/mappings_skywire.yaml \
-  --config ./sigma_config_placeholder.yaml \
-  --validate-only --formula-eval auto --pretty
-
-Switch to Fiber (NESS):
-
-python network_bridge/run_network_integrated.py \
-  --network fiber \
-  --discovery ./discovery \
-  --mappings ./network_bridge/mappings_fiber.yaml \
-  --config ./sigma_config_placeholder.yaml \
-  --validate-only --formula-eval auto --pretty
+python -m pytest -q
 
 
 ---
 
-🧾 Output Example (simplified)
+⚙️ Usage
 
-{
-  "status": "success",
-  "scores": {
-    "non_harm": 0.88,
-    "stability": 0.71,
-    "resilience": 0.63,
-    "equity": 0.89
-  },
-  "audit": {
-    "schema_version": "1.0",
-    "timestamp_utc": "2025-10-26T02:43:21Z",
-    "sha256": "fe3ac...8b2f"
-  }
-}
+1️⃣ Run the Integrated Network Bridge
+
+python -m network_bridge.run_network_integrated --network skywire --validate-only
+
+2️⃣ Append Mesh Memory Logs
+
+python -m tools.mesh_memory_append --input ./pilots/validation_logs/ --output ./pilots/mesh_memory.jsonl
+
+3️⃣ Generate Priority Matrix from Discovery
+
+python -m tools.priority_matrix_from_discovery --discovery ./discovery/decision_mapper.yaml --output ./pilots/priority_matrix.csv
+
+4️⃣ Full Validation via GitHub Actions
+
+Triggered automatically on each push or via manual dispatch:
+
+✅ Smoke CI — fast syntax, import, and resilience tests
+
+🌙 Nightly CI — deep validation of mapping and discovery flows
+
 
 
 ---
 
 🧪 Continuous Integration
 
-✅ Smoke Tests
+Sigma-Lab integrates two main pipelines:
 
-Located in .github/workflows/smoke.yml.
-Runs pytest -q on all modules including network bridges and resilience simulations.
+Workflow	Description	Status
 
-🧩 Resilience Suite
+Smoke CI	Runs all core and bridge unit tests	
+Nightly CI	Validates discovery logic & cross-bridge diagnostics	
 
-Stress-tests (test_resilience.py) ensure reproducibility, graceful failure, and determinism under load.
+
+All results are archived under /pilots/validation_logs
+and merged daily via the Mesh Memory script.
+
+
+---
+
+🔗 Ecosystem Integration
+
+Sigma-Lab serves as a procedural mirror for decentralized infrastructures:
+
+Skywire (α-phase) — network routing, telemetry validation
+
+Fiber (NESS) — encrypted data channel mappings
+
+Skyfleet collaboration — transparency layer bridging Skycoin governance models
+
+
+The goal is not competition, but interoperability:
+a shared diagnostic logic serving ethical, resilient, and open infrastructures.
+
+
+---
+
+📈 Current Stability
+
+Component	Status
+
+Smoke Workflow	✅ Stable
+Nightly Workflow	✅ Operational
+Analytical Tools	✅ Verified
+Bridges (Skywire / Fiber)	✅ Working
+YAML Configuration	✅ Valid
+Documentation	✅ Updated
 
 
 
 ---
 
-🧩 Governance
+🧭 Roadmap (v5.2 Horizon)
 
-Committee: DeepKang Labs Network Governance Committee (DL-NGC)
-License: MIT
-Maintainers: @DeepKang-Labs
-Contact: x.com/Mc_MomaL Yuri Kang
+🧬 Expanded Mesh Memory Model → dynamic node correlation
 
+🌐 Multi-Network Support (Skywire + Fiber + Chain)
 
----
+🤝 API Layer for Partner Systems → data integrity handshakes
 
-🌌 Roadmap
+🧱 Diagnostic Notebook Suite → live visual analytics and audit views
 
-Phase	Target	Status
-
-α 1	Skywire Bridge (live case validation)	✅ In testing
-α 2	Fiber (NESS) Bridge (compatibility check)	🚧 Preparation
-β 1	Multi-context calibrator	🧩 Design
-β 2	Human-in-the-loop Dashboard	🧭 Concept
-1.0	Sigma-Lab full decentralized deployment	🌍 Vision
+🔁 Adaptive Risk Mapping → self-correcting evaluators
 
 
 
 ---
 
-> 🕊️ “Between algorithmic logic and human judgment, Sigma-Lab builds a bridge.”
+🧾 License
+
+Released under the MIT License —
+freely usable for research, diagnostic, and educational purposes.
+
+
+---
+
+💬 Authors
+
+DeepKang-Labs
+🧠 AI Kang & Yuri Kang
+Procedural transparency advocates and architects of the Sigma-Lab Framework.
+
+> "We don’t automate authority — we illuminate its logic."
