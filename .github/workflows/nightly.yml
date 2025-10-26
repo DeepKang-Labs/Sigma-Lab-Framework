@@ -44,7 +44,6 @@ jobs:
             echo '      user_experience_impact: 6' >> discovery/decision_mapper.yaml
             echo '      security_implications: 3' >> discovery/decision_mapper.yaml
             echo '      current_pain_level: 5' >> discovery/decision_mapper.yaml
-            echo "Created discovery/decision_mapper.yaml"
           fi
 
       - name: Set PYTHONPATH
@@ -76,21 +75,30 @@ jobs:
             --formula-eval auto
 
       - name: Tools • mesh_memory_append
+        shell: bash
         run: |
-          if [ -f ./pilots/validation_logs/skywire_validate_only.json ]; then
+          REPORT=./pilots/validation_logs/skywire_validate_only.json
+          MEMORY=./pilots/validation_logs/mesh_memory.json
+          if [ -f "$REPORT" ]; then
             PYTHONPATH=$PWD python -m tools.mesh_memory_append \
-              --report ./pilots/validation_logs/skywire_validate_only.json \
-              --memory ./pilots/validation_logs/mesh_memory.json
+              --report "$REPORT" \
+              --memory "$MEMORY"
           else
-            echo "Missing skywire_validate_only.json; skipping mesh_memory_append."
+            echo "Report not found: $REPORT"
+            ls -la ./pilots/validation_logs || true
+            exit 1
           fi
 
       - name: Tools • priority_matrix_from_mappings
+        shell: bash
         run: |
-          if [ -f ./network_bridge/mappings_skywire.yaml ]; then
+          MAP=./network_bridge/mappings_skywire.yaml
+          OUT=./pilots/validation_logs/priority_matrix_report.json
+          if [ -f "$MAP" ]; then
             PYTHONPATH=$PWD python -m tools.priority_matrix_from_mappings \
-              --mappings ./network_bridge/mappings_skywire.yaml \
-              --out ./pilots/validation_logs/priority_matrix_report.json
+              --mappings "$MAP" \
+              --out "$OUT"
           else
-            echo "No mappings_skywire.yaml; skipping priority matrix."
+            echo "Mappings not found: $MAP"
+            exit 1
           fi
