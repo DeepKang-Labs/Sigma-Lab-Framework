@@ -1,0 +1,3 @@
+pyyaml>=6.0
+numpy>=1.24
+simpleeval>=0.9  # optional (used only in --formula-eval simple/auto with expressions)
