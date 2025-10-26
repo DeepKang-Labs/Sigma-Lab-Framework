@@ -1,8 +1,3 @@
----
-
-## 2.2 `network_bridge/network_bridge.py`
-
-```python
 #!/usr/bin/env python3
 # ============================================================
 # Network Bridge (Generic) — Skywire & Fiber (NESS)
@@ -10,20 +5,31 @@
 # ============================================================
 
 from __future__ import annotations
-import os, json, time, hashlib, yaml
+
+import os
+import json
+import time
+import hashlib
+import yaml
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 from difflib import SequenceMatcher
 
+
 # ---------------- Utility ----------------
 
 def clip01(x: float) -> float:
+    """Clamp a float to [0,1]."""
     return float(max(0.0, min(1.0, x)))
 
+
 def _similar(a: str, b: str) -> float:
+    """Lightweight fuzzy similarity for keyword matching."""
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
+
 def _hash_file(path: str) -> str:
+    """SHA256 of file; empty string if not found."""
     try:
         h = hashlib.sha256()
         with open(path, "rb") as f:
@@ -31,6 +37,7 @@ def _hash_file(path: str) -> str:
         return h.hexdigest()
     except Exception:
         return ""
+
 
 # ---------------- Data classes ----------------
 
@@ -41,6 +48,7 @@ class TensionMapping:
     sigma_dimensions: List[str]
     stakeholder_impact: Dict[str, float]
 
+
 # ---------------- Engine ----------------
 
 class NetworkBridge:
@@ -49,6 +57,11 @@ class NetworkBridge:
       - loads discovery data (real or demo)
       - transforms to SIGMA contexts via YAML mappings
       - can export contexts and build an integration report
+
+    formula_eval_mode:
+      - "linear":    use derive_risk_linear only (no external deps)
+      - "simple":    allow short expressions via simpleeval (lazy import)
+      - "auto":      prefer linear when present, else expressions
     """
 
     def __init__(
@@ -67,9 +80,9 @@ class NetworkBridge:
         self.network_name = network_name
         self.formula_eval_mode = formula_eval_mode
 
-        self._aliases = {}
-        self._mappings_raw = {}
-        self.mappings = self._load_mappings_yaml(mappings_path)
+        self._aliases: Dict[str, Any] = {}
+        self._mappings_raw: Dict[str, Any] = {}
+        self.mappings: List[TensionMapping] = self._load_mappings_yaml(mappings_path)
 
     # ---------- Loading ----------
 
@@ -83,7 +96,11 @@ class NetworkBridge:
             out.append(
                 TensionMapping(
                     mapping_id=m["mapping_id"],
-                    network_tension=m.get("skywire_tension") or m.get("fiber_tension") or m.get("network_tension", ""),
+                    network_tension=(
+                        m.get("skywire_tension")
+                        or m.get("fiber_tension")
+                        or m.get("network_tension", "")
+                    ),
                     sigma_dimensions=m["sigma_dimensions"],
                     stakeholder_impact=m.get("stakeholder_impact", {}),
                 )
@@ -91,6 +108,7 @@ class NetworkBridge:
         return out
 
     def load_discovery_data(self) -> Dict[str, Any]:
+        """Load discovery/decision_mapper.yaml, else return a deterministic demo."""
         path = os.path.join(self.discovery_kit_path, "decision_mapper.yaml")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -121,6 +139,7 @@ class NetworkBridge:
     # ---------- Validation ----------
 
     def validate_discovery(self, data: Dict[str, Any]) -> List[str]:
+        """Basic shape & range validation for discovery data."""
         warnings: List[str] = []
         for dp in data.get("decision_points", []):
             if "decision_id" not in dp:
@@ -135,6 +154,7 @@ class NetworkBridge:
     # ---------- Mapping & derivation ----------
 
     def _find_best_mapping(self, description: str) -> Dict[str, Any]:
+        """Pick the mapping whose keywords best match the decision description."""
         best = None
         best_score = 0.0
         desc = (description or "").lower()
@@ -149,13 +169,17 @@ class NetworkBridge:
         return self._aliases.get("stakeholders", {}).get(name, name)
 
     def _safe_eval_expr(self, expr: str, env: Dict[str, float]) -> float:
-        """Evaluates small expressions if allowed. Linear mode returns 0.5."""
+        """
+        Evaluate short expressions if enabled.
+        - In 'linear' mode or on any error, return 0.5.
+        """
         if self.formula_eval_mode == "linear":
             return 0.5
         if not expr:
             return 0.5
         try:
-            from simpleeval import simple_eval  # lazy import
+            # Lazy import to avoid hard dependency when not needed
+            from simpleeval import simple_eval  # type: ignore
         except Exception:
             return 0.5
         try:
@@ -165,6 +189,7 @@ class NetworkBridge:
             return 0.5
 
     def _derive_risks(self, decision: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, float]:
+        """Compute SIGMA short/long/irreversibility risks via linear mapping or expressions."""
         gd = decision.get("governance_dimensions", {})
         env = {
             "technical_complexity": float(gd.get("technical_complexity", 0.0)),
@@ -177,12 +202,14 @@ class NetworkBridge:
         lin = mapping.get("derive_risk_linear")
         if self.formula_eval_mode in ("linear", "auto") and lin:
             scale = float(lin.get("scale", 10.0))
-            def sel(key):
+
+            def sel(key: str) -> float:
                 src = lin.get(key)
                 if not src:
                     return 0.5
                 val = env.get(src, 5.0)
                 return clip01(val / scale)
+
             return {
                 "short_term_risk": sel("short_term"),
                 "long_term_risk": sel("long_term"),
@@ -197,7 +224,7 @@ class NetworkBridge:
             irr = self._safe_eval_expr(dr.get("irreversibility", "0.5"), env)
             return {
                 "short_term_risk": st if st <= 1 else clip01(st / 10.0),
-                "long_term_risk":  lt if lt <= 1 else clip01(lt / 10.0),
+                "long_term_risk": lt if lt <= 1 else clip01(lt / 10.0),
                 "irreversibility_risk": irr if irr <= 1 else clip01(irr / 10.0),
             }
 
@@ -255,7 +282,9 @@ class NetworkBridge:
                     "original_decision_id": dp.get("decision_id", "unknown"),
                     "pain_level": dp.get("current_pain_level", None),
                     "decision_frequency": dp.get("decision_frequency", None),
-                    "discovery_source": "NetworkBridge demo" if "dp_demo" in dp.get("decision_id","") else "Discovery",
+                    "discovery_source": "NetworkBridge demo"
+                        if "dp_demo" in dp.get("decision_id", "")
+                        else "Discovery",
                 },
                 "transform_provenance": {
                     "mappings_file": self.mappings_path,
@@ -338,3 +367,4 @@ class NetworkBridge:
         if extra_meta:
             report["meta"] = extra_meta
         return report
+```0
