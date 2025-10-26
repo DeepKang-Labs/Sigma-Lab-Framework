@@ -4,7 +4,21 @@
 # ============================================================
 
 import os, sys, json, argparse, yaml
-from network_bridge.network_bridge import NetworkBridge
+
+# --- Robust import path handling (works in CI and local) ---
+HERE = os.path.abspath(os.path.dirname(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(HERE, os.pardir))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+try:
+    # Preferred: import as a package (requires network_bridge/__init__.py)
+    from network_bridge.network_bridge import NetworkBridge
+except ModuleNotFoundError:
+    # Fallback: import module directly when run from inside the folder
+    sys.path.insert(0, HERE)
+    from network_bridge import NetworkBridge  # type: ignore
+
 
 def _benchmark_compare(results, baseline):
     dims = ["non_harm", "stability", "resilience", "equity"]
@@ -16,6 +30,7 @@ def _benchmark_compare(results, baseline):
     delta = {d: round(avg[d] - float(base.get(d, 0.0)), 3) for d in dims}
     return {"average_scores": avg, "baseline": base, "delta": delta}
 
+
 def _demo_results(contexts):
     out = []
     for _ in contexts:
@@ -25,6 +40,7 @@ def _demo_results(contexts):
             "verdict": None
         })
     return out
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -83,7 +99,6 @@ def main():
     print("3) Running Sigma-Lab diagnostics…")
     sigma_results = []
     try:
-        # Mono-file core (present in repo)
         from sigma_lab_v4_2 import SigmaLab, demo_context, OptionContext, Stakeholder
         base_cfg, _ = demo_context("public")
         engine = SigmaLab(base_cfg)
@@ -125,6 +140,7 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2 if args.pretty else None, ensure_ascii=False)
     print(f"✅ Done. Report saved → {args.out}")
+
 
 if __name__ == "__main__":
     main()
