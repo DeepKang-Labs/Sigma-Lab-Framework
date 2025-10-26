@@ -1,9 +1,13 @@
 name: smoke
-on: [push]
+
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -11,26 +15,39 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
           python -m pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Ensure pytest is available for unit tests
+          pip install pytest
 
-      - name: Create demo discovery data
+      - name: Create required folders
         run: |
           mkdir -p discovery
-          # optional placeholder; NetworkBridge has a demo fallback
-          echo "version: '1.0'\ndiscovery_date: '2025-10-25'\ndecision_points: []" > discovery/decision_mapper.yaml
+          mkdir -p pilots/validation_logs
+          # keep folder tracked
+          touch pilots/validation_logs/.gitkeep
+
+      - name: Create demo discovery data (safe fallback)
+        run: |
+          cat > discovery/decision_mapper.yaml << 'YAML'
+          version: "1.0"
+          discovery_date: "2025-10-25"
+          decision_points: []
+          YAML
 
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
       - name: Run unit tests (bridge)
-        run: python -m pytest -q
+        run: |
+          python -m pytest -q
 
       - name: Bridge • validate-only (Skywire)
+      # Produces a JSON report without executing Sigma-Lab
         run: |
           python network_bridge/run_network_integrated.py \
             --network skywire \
@@ -58,4 +75,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: validate-only-reports
-          path: pilots/validation_logs/*.json
+          path: |
+            pilots/validation_logs/skywire_validate_only.json
+            pilots/validation_logs/fiber_validate_only.json
