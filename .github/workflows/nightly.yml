@@ -1,7 +1,7 @@
 name: nightly
 on:
   schedule:
-    - cron: '0 3 * * *' # Run every night at 3 AM UTC
+    - cron: "0 3 * * *"  # every day at 03:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -32,19 +32,19 @@ jobs:
         run: |
           if [ ! -f discovery/decision_mapper.yaml ]; then
             cat > discovery/decision_mapper.yaml <<'YAML'
-version: "1.0"
-discovery_date: "2025-10-25"
-decision_points:
-  - decision_id: "dp_demo_ci"
-    description: "CI demo decision for nightly"
-    stakeholders: ["end_users", "core_devs"]
-    governance_dimensions:
-      technical_complexity: 5
-      economic_impact: 4
-      user_experience_impact: 6
-      security_implications: 3
-    current_pain_level: 5
-YAML
+            version: "1.0"
+            discovery_date: "2025-10-25"
+            decision_points:
+              - decision_id: "dp_demo_ci"
+                description: "CI demo decision for nightly"
+                stakeholders: ["end_users", "core_devs"]
+                governance_dimensions:
+                  technical_complexity: 5
+                  economic_impact: 4
+                  user_experience_impact: 6
+                  security_implications: 3
+                current_pain_level: 5
+            YAML
           fi
 
       - name: Set PYTHONPATH
@@ -81,3 +81,9 @@ YAML
             --inputs ./pilots/validation_logs/skywire_validate_only.json \
                      ./pilots/validation_logs/fiber_validate_only.json \
             --output ./pilots/validation_logs/mesh_memory.json
+
+      - name: Tools • priority_matrix_from_mappings
+        run: |
+          python -m tools.priority_matrix_from_mappings \
+            --mappings ./network_bridge/mappings_skywire.yaml \
+            --output ./pilots/validation_logs/governance_priority_matrix.csv
