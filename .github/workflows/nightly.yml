@@ -31,20 +31,26 @@ jobs:
         shell: bash
         run: |
           if [ ! -f discovery/decision_mapper.yaml ]; then
-            cat > discovery/decision_mapper.yaml <<'YAML'
-            version: "1.0"
-            discovery_date: "2025-10-25"
-            decision_points:
-              - decision_id: "dp_demo_ci"
-                description: "CI demo decision for nightly"
-                stakeholders: ["end_users", "core_devs"]
-                governance_dimensions:
-                  technical_complexity: 5
-                  economic_impact: 4
-                  user_experience_impact: 6
-                  security_implications: 3
-                current_pain_level: 5
-            YAML
+            python - <<'PY'
+from pathlib import Path
+content = """\
+version: "1.0"
+discovery_date: "2025-10-25"
+decision_points:
+  - decision_id: "dp_demo_ci"
+    description: "CI demo decision for nightly"
+    stakeholders: ["end_users", "core_devs"]
+    governance_dimensions:
+      technical_complexity: 5
+      economic_impact: 4
+      user_experience_impact: 6
+      security_implications: 3
+    current_pain_level: 5
+"""
+Path("discovery").mkdir(parents=True, exist_ok=True)
+Path("discovery/decision_mapper.yaml").write_text(content, encoding="utf-8")
+print("Wrote discovery/decision_mapper.yaml")
+PY
           fi
 
       - name: Set PYTHONPATH
