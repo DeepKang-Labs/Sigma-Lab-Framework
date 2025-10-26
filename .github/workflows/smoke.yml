@@ -28,23 +28,22 @@ jobs:
           mkdir -p discovery
 
       - name: Create demo discovery data (safe fallback)
-        shell: bash
         run: |
           if [ ! -f discovery/decision_mapper.yaml ]; then
-            cat > discovery/decision_mapper.yaml <<'YAML'
-version: "1.0"
-discovery_date: "2025-10-25"
-decision_points:
-  - decision_id: "dp_demo_ci"
-    description: "CI demo decision for smoke"
-    stakeholders: ["end_users","core_devs"]
-    governance_dimensions:
-      technical_complexity: 5
-      economic_impact: 4
-      user_experience_impact: 6
-      security_implications: 3
-    current_pain_level: 5
-YAML
+            {
+              echo 'version: "1.0"'
+              echo 'discovery_date: "2025-10-25"'
+              echo 'decision_points:'
+              echo '  - decision_id: "dp_demo_ci"'
+              echo '    description: "CI demo decision for smoke"'
+              echo '    stakeholders: ["end_users","core_devs"]'
+              echo '    governance_dimensions:'
+              echo '      technical_complexity: 5'
+              echo '      economic_impact: 4'
+              echo '      user_experience_impact: 6'
+              echo '      security_implications: 3'
+              echo '    current_pain_level: 5'
+            } > discovery/decision_mapper.yaml
           fi
 
       - name: Set PYTHONPATH
@@ -54,7 +53,6 @@ YAML
       - name: Run unit tests (bridge + core)
         run: python -m pytest -q
 
-      # --- Network Bridge validate-only (Skywire)
       - name: Bridge • validate-only (Skywire)
         run: |
           python -m network_bridge.run_network_integrated \
@@ -66,7 +64,6 @@ YAML
             --validate-only \
             --formula-eval auto
 
-      # --- Network Bridge validate-only (Fiber)
       - name: Bridge • validate-only (Fiber)
         run: |
           python -m network_bridge.run_network_integrated \
