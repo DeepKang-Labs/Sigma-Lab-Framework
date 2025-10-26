@@ -73,10 +73,17 @@ jobs:
             --validate-only \
             --formula-eval auto
 
+      # MeshMemory attend un fichier --report d'ENTRÉE.
+      # On lui donne le rapport produit par la validation Skywire.
       - name: Tools • mesh_memory_append
         run: |
-          PYTHONPATH=$PWD python -m tools.mesh_memory_append \
-            --report ./pilots/validation_logs/mesh_memory_report.json
+          if [ -f ./pilots/validation_logs/skywire_validate_only.json ]; then
+            PYTHONPATH=$PWD python -m tools.mesh_memory_append \
+              --report ./pilots/validation_logs/skywire_validate_only.json \
+              --memory ./pilots/validation_logs/mesh_memory.json
+          else
+            echo "Missing skywire_validate_only.json; skipping mesh_memory_append."
+          fi
 
       - name: Tools • priority_matrix_from_mappings
         run: |
