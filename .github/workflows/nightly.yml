@@ -2,7 +2,7 @@ name: nightly
 
 on:
   schedule:
-    - cron: "0 3 * * *" # every day at 03:00 UTC
+    - cron: "0 3 * * *"   # every day at 03:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -32,25 +32,19 @@ jobs:
         shell: bash
         run: |
           if [ ! -f discovery/decision_mapper.yaml ]; then
-            python - <<'PY'
-from pathlib import Path
-content = """version: "1.0"
-discovery_date: "2025-10-25"
-decision_points:
-  - decision_id: "dp_demo_ci"
-    description: "CI demo decision for nightly"
-    stakeholders: ["end_users", "core_devs"]
-    governance_dimensions:
-      technical_complexity: 5
-      economic_impact: 4
-      user_experience_impact: 6
-      security_implications: 3
-      current_pain_level: 5
-"""
-Path("discovery").mkdir(parents=True, exist_ok=True)
-Path("discovery/decision_mapper.yaml").write_text(content, encoding="utf-8")
-print("Wrote discovery/decision_mapper.yaml")
-PY
+            echo 'version: "1.0"' > discovery/decision_mapper.yaml
+            echo 'discovery_date: "2025-10-25"' >> discovery/decision_mapper.yaml
+            echo 'decision_points:' >> discovery/decision_mapper.yaml
+            echo '  - decision_id: "dp_demo_ci"' >> discovery/decision_mapper.yaml
+            echo '    description: "CI demo decision for nightly"' >> discovery/decision_mapper.yaml
+            echo '    stakeholders: ["end_users", "core_devs"]' >> discovery/decision_mapper.yaml
+            echo '    governance_dimensions:' >> discovery/decision_mapper.yaml
+            echo '      technical_complexity: 5' >> discovery/decision_mapper.yaml
+            echo '      economic_impact: 4' >> discovery/decision_mapper.yaml
+            echo '      user_experience_impact: 6' >> discovery/decision_mapper.yaml
+            echo '      security_implications: 3' >> discovery/decision_mapper.yaml
+            echo '      current_pain_level: 5' >> discovery/decision_mapper.yaml
+            echo "Created discovery/decision_mapper.yaml"
           fi
 
       - name: Set PYTHONPATH
@@ -88,6 +82,10 @@ PY
 
       - name: Tools • priority_matrix_from_mappings
         run: |
-          PYTHONPATH=$PWD python -m tools.priority_matrix_from_mappings \
-            --mappings ./network_bridge/mappings_skywire.yaml \
-            --out ./pilots/validation_logs/priority_matrix_report.json
+          if [ -f ./network_bridge/mappings_skywire.yaml ]; then
+            PYTHONPATH=$PWD python -m tools.priority_matrix_from_mappings \
+              --mappings ./network_bridge/mappings_skywire.yaml \
+              --out ./pilots/validation_logs/priority_matrix_report.json
+          else
+            echo "No mappings_skywire.yaml; skipping priority matrix."
+          fi
