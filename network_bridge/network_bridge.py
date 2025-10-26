@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # ============================================================
 # Network Bridge (Generic) — Skywire & Fiber (NESS)
 # MIT License — DeepKang Labs
@@ -10,26 +11,24 @@ import os
 import json
 import time
 import hashlib
-import yaml
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 from difflib import SequenceMatcher
+
+import yaml
 
 
 # ---------------- Utility ----------------
 
 def clip01(x: float) -> float:
-    """Clamp a float to [0,1]."""
     return float(max(0.0, min(1.0, x)))
 
 
 def _similar(a: str, b: str) -> float:
-    """Lightweight fuzzy similarity for keyword matching."""
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
 def _hash_file(path: str) -> str:
-    """SHA256 of file; empty string if not found."""
     try:
         h = hashlib.sha256()
         with open(path, "rb") as f:
@@ -53,15 +52,15 @@ class TensionMapping:
 
 class NetworkBridge:
     """
-    Generic bridge:
+    Generic bridge that:
       - loads discovery data (real or demo)
       - transforms to SIGMA contexts via YAML mappings
       - can export contexts and build an integration report
 
-    formula_eval_mode:
-      - "linear":    use derive_risk_linear only (no external deps)
-      - "simple":    allow short expressions via simpleeval (lazy import)
-      - "auto":      prefer linear when present, else expressions
+    Evaluation modes for risk derivation:
+      - linear : use derive_risk_linear (field mapping + scale), no external deps
+      - simple : evaluate short expressions via simpleeval (lazy import)
+      - auto   : prefer linear when present, otherwise try expressions
     """
 
     def __init__(
@@ -80,7 +79,7 @@ class NetworkBridge:
         self.network_name = network_name
         self.formula_eval_mode = formula_eval_mode
 
-        self._aliases: Dict[str, Any] = {}
+        self._aliases: Dict[str, Dict[str, str]] = {}
         self._mappings_raw: Dict[str, Any] = {}
         self.mappings: List[TensionMapping] = self._load_mappings_yaml(mappings_path)
 
@@ -101,14 +100,13 @@ class NetworkBridge:
                         or m.get("fiber_tension")
                         or m.get("network_tension", "")
                     ),
-                    sigma_dimensions=m["sigma_dimensions"],
-                    stakeholder_impact=m.get("stakeholder_impact", {}),
+                    sigma_dimensions=list(m["sigma_dimensions"]),
+                    stakeholder_impact=dict(m.get("stakeholder_impact", {})),
                 )
             )
         return out
 
     def load_discovery_data(self) -> Dict[str, Any]:
-        """Load discovery/decision_mapper.yaml, else return a deterministic demo."""
         path = os.path.join(self.discovery_kit_path, "decision_mapper.yaml")
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -139,13 +137,17 @@ class NetworkBridge:
     # ---------- Validation ----------
 
     def validate_discovery(self, data: Dict[str, Any]) -> List[str]:
-        """Basic shape & range validation for discovery data."""
         warnings: List[str] = []
         for dp in data.get("decision_points", []):
             if "decision_id" not in dp:
                 warnings.append("Decision without 'decision_id'")
             gd = dp.get("governance_dimensions", {})
-            for k in ["technical_complexity", "economic_impact", "user_experience_impact", "security_implications"]:
+            for k in (
+                "technical_complexity",
+                "economic_impact",
+                "user_experience_impact",
+                "security_implications",
+            ):
                 v = gd.get(k, None)
                 if v is None or not (0 <= v <= 10):
                     warnings.append(f"{dp.get('decision_id','?')}: {k} out of [0..10] or missing")
@@ -154,32 +156,30 @@ class NetworkBridge:
     # ---------- Mapping & derivation ----------
 
     def _find_best_mapping(self, description: str) -> Dict[str, Any]:
-        """Pick the mapping whose keywords best match the decision description."""
+        mappings = self._mappings_raw.get("mappings", [])
+        if not mappings:
+            return {}
         best = None
         best_score = 0.0
         desc = (description or "").lower()
-        for m in self._mappings_raw.get("mappings", []):
+        for m in mappings:
             kw = m.get("keywords", [])
             score = max((_similar(desc, k) for k in kw), default=0.0)
             if score > best_score:
                 best, best_score = m, score
-        return best or (self._mappings_raw.get("mappings", [])[0])
+        return best or mappings[0]
 
     def _normalize_stakeholder(self, name: str) -> str:
         return self._aliases.get("stakeholders", {}).get(name, name)
 
     def _safe_eval_expr(self, expr: str, env: Dict[str, float]) -> float:
-        """
-        Evaluate short expressions if enabled.
-        - In 'linear' mode or on any error, return 0.5.
-        """
+        """Evaluate short expressions if allowed. Linear mode returns 0.5."""
         if self.formula_eval_mode == "linear":
             return 0.5
         if not expr:
             return 0.5
         try:
-            # Lazy import to avoid hard dependency when not needed
-            from simpleeval import simple_eval  # type: ignore
+            from simpleeval import simple_eval  # lazy import
         except Exception:
             return 0.5
         try:
@@ -189,7 +189,6 @@ class NetworkBridge:
             return 0.5
 
     def _derive_risks(self, decision: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, float]:
-        """Compute SIGMA short/long/irreversibility risks via linear mapping or expressions."""
         gd = decision.get("governance_dimensions", {})
         env = {
             "technical_complexity": float(gd.get("technical_complexity", 0.0)),
@@ -229,7 +228,11 @@ class NetworkBridge:
             }
 
         # Fallback neutral
-        return {"short_term_risk": 0.5, "long_term_risk": 0.5, "irreversibility_risk": 0.5}
+        return {
+            "short_term_risk": 0.5,
+            "long_term_risk": 0.5,
+            "irreversibility_risk": 0.5,
+        }
 
     def _create_stakeholders(self, decision: Dict[str, Any], mapping: Dict[str, Any]) -> List[Dict[str, Any]]:
         base = mapping.get("stakeholder_impact", {})
@@ -237,11 +240,13 @@ class NetworkBridge:
         for st in decision.get("stakeholders", []):
             normalized = self._normalize_stakeholder(st)
             if normalized in base:
-                out.append({
-                    "name": normalized,
-                    "vulnerability": clip01(0.6 if normalized in ("users", "end_users") else 0.5),
-                    "impact_benefit": clip01(base[normalized]),
-                })
+                out.append(
+                    {
+                        "name": normalized,
+                        "vulnerability": clip01(0.6 if normalized in ("users", "end_users") else 0.5),
+                        "impact_benefit": clip01(float(base[normalized])),
+                    }
+                )
             else:
                 out.append({"name": normalized, "vulnerability": 0.5, "impact_benefit": 0.5})
         return out
@@ -282,9 +287,9 @@ class NetworkBridge:
                     "original_decision_id": dp.get("decision_id", "unknown"),
                     "pain_level": dp.get("current_pain_level", None),
                     "decision_frequency": dp.get("decision_frequency", None),
-                    "discovery_source": "NetworkBridge demo"
-                        if "dp_demo" in dp.get("decision_id", "")
-                        else "Discovery",
+                    "discovery_source": (
+                        "NetworkBridge demo" if "dp_demo" in dp.get("decision_id", "") else "Discovery"
+                    ),
                 },
                 "transform_provenance": {
                     "mappings_file": self.mappings_path,
@@ -292,12 +297,12 @@ class NetworkBridge:
                     "risk_formulas": mapping.get("derive_risk", {}),
                     "risk_linear": mapping.get("derive_risk_linear", {}),
                     "formula_eval_mode": self.formula_eval_mode,
-                }
+                },
             }
             contexts.append(ctx)
         return contexts
 
-    def export_sigma_contexts(self, contexts: List[Dict[str, Any]]):
+    def export_sigma_contexts(self, contexts: List[Dict[str, Any]]) -> None:
         if not self.export_contexts_dir:
             return
         os.makedirs(self.export_contexts_dir, exist_ok=True)
@@ -340,7 +345,7 @@ class NetworkBridge:
         veto_fail = [r for r in sigma_results if r.get("vetoes")]
 
         src_path = os.path.join(self.discovery_kit_path, "decision_mapper.yaml")
-        report = {
+        report: Dict[str, Any] = {
             "integration_report": {
                 "version": "1.0",
                 "generated_by": "NetworkBridge",
@@ -367,4 +372,3 @@ class NetworkBridge:
         if extra_meta:
             report["meta"] = extra_meta
         return report
-```0
