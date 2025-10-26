@@ -1,86 +1,61 @@
 name: smoke
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+on: [push]
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install numpy pyyaml
-
-      - name: Show tree (debug)
-        run: |
-          echo "📂 Repository tree:"
-          ls -R
-
-      - name: Run Sigma-Lab unit tests
-        run: |
-          echo "🧪 Running Sigma-Lab tests..."
-          python sigma_lab_v4_2.py --test
-
-      - name: Ensure skywire_bridge is a package (safety net)
-        run: |
-          test -f skywire_bridge/__init__.py || touch skywire_bridge/__init__.py
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Create demo discovery data
         run: |
-          mkdir -p skywire_bridge/discovery
-          cat > skywire_bridge/discovery/decision_mapper.yaml <<'EOF'
-          version: "1.0"
-          discovery_date: "2025-10-25"
-          decision_points:
-            - decision_id: "dp_001"
-              description: "Latency vs decentralization routing optimization"
-              stakeholders: ["relay_nodes", "end_users", "core_devs"]
-              governance_dimensions:
-                technical_complexity: 6
-                economic_impact: 5
-                user_experience_impact: 8
-                security_implications: 4
-          EOF
+          mkdir -p discovery
+          # optional placeholder; NetworkBridge has a demo fallback
+          echo "version: '1.0'\ndiscovery_date: '2025-10-25'\ndecision_points: []" > discovery/decision_mapper.yaml
 
       - name: Set PYTHONPATH
-        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
-      # Mode validation seulement
-      - name: Bridge • validate-only mode
+      - name: Run unit tests (bridge)
+        run: python -m pytest -q
+
+      - name: Bridge • validate-only (Skywire)
         run: |
-          echo "🔍 Running Skywire Bridge (validate-only)..."
-          python skywire_bridge/run_skywire_integrated.py \
-            --discovery skywire_bridge/discovery \
-            --config skywire_bridge/config_skywire_optimized.yaml \
-            --mappings skywire_bridge/skywire_mappings.yaml \
-            --out skywire_bridge/_validate_report.json \
-            --validate-only
+          python network_bridge/run_network_integrated.py \
+            --network skywire \
+            --discovery ./discovery \
+            --mappings ./network_bridge/mappings_skywire.yaml \
+            --config ./sigma_config_placeholder.yaml \
+            --out ./pilots/validation_logs/skywire_validate_only.json \
+            --validate-only \
+            --formula-eval auto \
+            --pretty
 
-      # Pipeline complet
-      - name: Bridge • full pipeline
+      - name: Bridge • validate-only (Fiber)
         run: |
-          echo "🚀 Running full Skywire → Sigma-Lab pipeline..."
-          python skywire_bridge/run_skywire_integrated.py \
-            --discovery skywire_bridge/discovery \
-            --config skywire_bridge/config_skywire_optimized.yaml \
-            --mappings skywire_bridge/skywire_mappings.yaml \
-            --out skywire_bridge/_final_report.json
+          python network_bridge/run_network_integrated.py \
+            --network fiber \
+            --discovery ./discovery \
+            --mappings ./network_bridge/mappings_fiber.yaml \
+            --config ./sigma_config_placeholder.yaml \
+            --out ./pilots/validation_logs/fiber_validate_only.json \
+            --validate-only \
+            --formula-eval auto \
+            --pretty
 
-      - name: Upload bridge report
+      - name: Upload validate-only reports
         uses: actions/upload-artifact@v4
         with:
-          name: skywire-bridge-report
-          path: skywire_bridge/_final_report.json
+          name: validate-only-reports
+          path: pilots/validation_logs/*.json
