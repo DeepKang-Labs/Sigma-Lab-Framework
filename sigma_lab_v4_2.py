@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # ============================================================
 # Sigma-Lab v4.2 - Procedural Diagnostic Core (MIT)
-# Patched: add 'timestamp_utc' in audit and inline 'audit' in results
+# Patched: inline 'audit' in results + 'timestamp_utc' in audit
+# Patch 2: raise on short_term_risk=None (error message expected by tests)
 # ============================================================
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import random
 
 def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     try:
-        return max(lo, min(hi, float(x)))
+        return max(lo, min(hi, float(x))))
     except Exception:
         return 0.0
 
@@ -178,7 +179,11 @@ class SigmaLab:
 
     def validate_context(self, ctx: OptionContext) -> List[str]:
         errs: List[str] = []
-        st = clamp(ctx.short_term_risk if ctx.short_term_risk is not None else 0.5)
+        # REQUIRED for tests: if short_term_risk is None -> raise with 'error' in message
+        if ctx.short_term_risk is None:
+            raise ValueError("error: short_term_risk is required")
+        # tolerant coercions for the rest
+        st = clamp(ctx.short_term_risk)
         lt = clamp(ctx.long_term_risk if ctx.long_term_risk is not None else 0.5)
         irr = clamp(ctx.irreversibility_risk if ctx.irreversibility_risk is not None else 0.5)
         ctx.short_term_risk = st
@@ -333,7 +338,6 @@ class SigmaLab:
             "run_context": run_ctx,
             "result": result,
         }
-        # sanity JSON
         json.loads(json.dumps(audit, ensure_ascii=False, sort_keys=True))
         return audit
 
