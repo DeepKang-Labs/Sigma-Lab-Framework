@@ -42,7 +42,7 @@ jobs:
             echo '      user_experience_impact: 6' >> discovery/decision_mapper.yaml
             echo '      security_implications: 3' >> discovery/decision_mapper.yaml
             echo '      current_pain_level: 5' >> discovery/decision_mapper.yaml
-            echo "✅ Created discovery/decision_mapper.yaml"
+            echo "Created discovery/decision_mapper.yaml"
           fi
 
       - name: Set PYTHONPATH
@@ -80,6 +80,10 @@ jobs:
 
       - name: Tools • priority_matrix_from_mappings
         run: |
-          PYTHONPATH=$PWD python -m tools.priority_matrix_from_mappings \
-            --mappings ./network_bridge/mappings_skywire.yaml \
-            --out ./pilots/validation_logs/priority_matrix_report.json
+          if [ -f ./network_bridge/mappings_skywire.yaml ]; then
+            PYTHONPATH=$PWD python -m tools.priority_matrix_from_mappings \
+              --mappings ./network_bridge/mappings_skywire.yaml \
+              --out ./pilots/validation_logs/priority_matrix_report.json
+          else
+            echo "No mappings_skywire.yaml; skipping priority matrix."
+          fi
