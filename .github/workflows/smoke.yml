@@ -1,7 +1,6 @@
 name: smoke
 
 on:
-  push:
   workflow_dispatch:
 
 jobs:
@@ -19,8 +18,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Ensure CI tools are present
+          pip install pytest simpleeval
 
       - name: Create required folders
         run: |
@@ -28,31 +28,37 @@ jobs:
           mkdir -p discovery
 
       - name: Create demo discovery data (safe fallback)
+        shell: bash
         run: |
           if [ ! -f discovery/decision_mapper.yaml ]; then
-            {
-              echo 'version: "1.0"'
-              echo 'discovery_date: "2025-10-25"'
-              echo 'decision_points:'
-              echo '  - decision_id: "dp_demo_ci"'
-              echo '    description: "CI demo decision for smoke"'
-              echo '    stakeholders: ["end_users","core_devs"]'
-              echo '    governance_dimensions:'
-              echo '      technical_complexity: 5'
-              echo '      economic_impact: 4'
-              echo '      user_experience_impact: 6'
-              echo '      security_implications: 3'
-              echo '    current_pain_level: 5'
-            } > discovery/decision_mapper.yaml
+            python - <<'PY'
+from pathlib import Path
+content = """version: "1.0"
+discovery_date: "2025-10-25"
+decision_points:
+  - decision_id: "dp_demo_ci"
+    description: "CI demo decision for smoke"
+    stakeholders: ["end_users","core_devs"]
+    governance_dimensions:
+      technical_complexity: 5
+      economic_impact: 4
+      user_experience_impact: 6
+      security_implications: 3
+    current_pain_level: 5
+"""
+Path("discovery").mkdir(parents=True, exist_ok=True)
+Path("discovery/decision_mapper.yaml").write_text(content, encoding="utf-8")
+print("Wrote discovery/decision_mapper.yaml")
+PY
           fi
 
       - name: Set PYTHONPATH
-        run: |
-          echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
+        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
-      - name: Run unit tests (bridge + core)
+      - name: Run unit tests (core + bridge)
         run: python -m pytest -q
 
+      # ---- Bridge validate-only (Skywire)
       - name: Bridge • validate-only (Skywire)
         run: |
           python -m network_bridge.run_network_integrated \
@@ -64,6 +70,7 @@ jobs:
             --validate-only \
             --formula-eval auto
 
+      # ---- Bridge validate-only (Fiber)
       - name: Bridge • validate-only (Fiber)
         run: |
           python -m network_bridge.run_network_integrated \
@@ -75,8 +82,40 @@ jobs:
             --validate-only \
             --formula-eval auto
 
-      - name: Upload validate-only reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: validation-reports
-          path: pilots/validation_logs/
+      - name: Tools • mesh_memory_append
+        run: |
+          set -e
+          MEM=./pilots/validation_logs/mesh_memory.jsonl
+
+          if [ -f ./pilots/validation_logs/skywire_validate_only.json ]; then
+            echo "[mesh] appending skywire report → $MEM"
+            python -m tools.mesh_memory_append \
+              --report ./pilots/validation_logs/skywire_validate_only.json \
+              --memory "$MEM"
+          else
+            echo "[mesh] no skywire report found, skipping"
+          fi
+
+          if [ -f ./pilots/validation_logs/fiber_validate_only.json ]; then
+            echo "[mesh] appending fiber report → $MEM"
+            python -m tools.mesh_memory_append \
+              --report ./pilots/validation_logs/fiber_validate_only.json \
+              --memory "$MEM"
+          else
+            echo "[mesh] no fiber report found, skipping"
+          fi
+
+      - name: Tools • priority_matrix_from_mappings
+        run: |
+          # Produce matrices for both mappings (if they exist)
+          if [ -f ./network_bridge/mappings_skywire.yaml ]; then
+            python -m tools.priority_matrix_from_mappings \
+              --mappings ./network_bridge/mappings_skywire.yaml \
+              --out ./pilots/validation_logs/priority_matrix_skywire.csv
+          fi
+
+          if [ -f ./network_bridge/mappings_fiber.yaml ]; then
+            python -m tools.priority_matrix_from_mappings \
+              --mappings ./network_bridge/mappings_fiber.yaml \
+              --out ./pilots/validation_logs/priority_matrix_fiber.csv
+          fi
