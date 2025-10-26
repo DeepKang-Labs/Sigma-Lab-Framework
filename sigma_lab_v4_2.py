@@ -242,14 +242,12 @@ class SigmaLab:
             if isinstance(s, Stakeholder):
                 out.append(s)
             elif isinstance(s, str):
-                # default neutral profile for string stakeholder
                 out.append(Stakeholder(s.strip() or "unknown"))
         if not out:
             out = [Stakeholder("public")]
         return out
 
     def _validate_or_raise_types(self, ctx: OptionContext):
-        # If any *critical* value is None → raise (for recovery_from_partial_failure test)
         critical = {
             "short_term_risk": ctx.short_term_risk,
             "long_term_risk": ctx.long_term_risk,
@@ -260,7 +258,6 @@ class SigmaLab:
                 raise ValueError(f"error: '{k}' is None")
 
     def _soft_sanitize_numbers(self, ctx: OptionContext) -> List[str]:
-        # Clamp out-of-range numbers with warnings (for massive_random tests)
         warns: List[str] = []
         triples = [
             ("short_term_risk", "short_term_risk"),
@@ -277,7 +274,6 @@ class SigmaLab:
                 setattr(ctx, attr, clip01(vf))
             else:
                 setattr(ctx, attr, vf)
-        # Stakeholders bounds
         for s in ctx.stakeholders:
             if s.vulnerability < 0 or s.vulnerability > 1:
                 warns.append(f"Stakeholder '{s.name}' vulnerability clamped")
@@ -298,7 +294,6 @@ class SigmaLab:
             return max(st, lt)
         elif hm.base_agg == "mean":
             return safe_mean([st, lt])
-        # weighted
         w = float(hm.base_agg_weight)
         return clip01(w * st + (1.0 - w) * lt)
 
@@ -344,16 +339,10 @@ class SigmaLab:
         Always returns a dict containing a 'diagnostic' key on success paths.
         If a critical None is found, raises ValueError("error: ...").
         """
-        # 0) Convert string stakeholders to Stakeholder objects
         ctx.stakeholders = self._coerce_stakeholders(ctx.stakeholders)
-
-        # 1) Raise for None (explicitly required by tests)
         self._validate_or_raise_types(ctx)
-
-        # 2) Soft sanitize out-of-range numbers into [0,1] with warnings
         warnings = self._soft_sanitize_numbers(ctx)
 
-        # 3) Evaluate sub-scores
         nh, nh_d = self._eval_non_harm(ctx)
         st, st_d = self._eval_stability(ctx)
         re, re_d = self._eval_resilience(ctx)
@@ -367,7 +356,6 @@ class SigmaLab:
             "equity": vf["equity"](eq),
         }
 
-        # 4) Vetoes & verdict
         vetoes: List[str] = []
         th = self.cfg.thresholds
         if scores["non_harm"] < th.non_harm_floor:
@@ -381,7 +369,7 @@ class SigmaLab:
             agg = sum(scores[k] * w[k] for k in w.keys())
             verdict = "ACCEPT" if agg >= self.cfg.verdict_acceptance_threshold and not vetoes else "REVIEW"
 
-        # 5) Build result (must include 'diagnostic')
+        # core result
         result = {
             "status": "success",
             "warnings": warnings,
@@ -400,11 +388,18 @@ class SigmaLab:
                 "note": "Procedural diagnostic only. No moral truth claim.",
                 "verdict_threshold": self.cfg.verdict_acceptance_threshold
             },
-            "diagnostic": {  # deterministic structure expected by tests
+            "diagnostic": {
                 "scores": scores,
                 "vetoes": vetoes
             }
         }
+
+        # attach a minimal, non-recursive audit stub expected by tests
+        result["audit"] = {
+            "schema_version": "1.0",
+            "timestamp_utc": datetime.now(timezone.utc).isoformat()
+        }
+
         return result
 
     # ---------- AUDIT TRAIL ----------
@@ -412,23 +407,24 @@ class SigmaLab:
     def export_audit_trail(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Returns a JSON-serializable audit trail (no dataclass objects left).
+        Must include 'timestamp_utc' for tests.
         """
-        cfg_blob = asdict(self.cfg)  # fully primitive (recursively)
+        cfg_blob = asdict(self.cfg)
         ctx_meta = {
             "verdict_threshold": self.cfg.verdict_acceptance_threshold,
             "thresholds": cfg_blob.get("thresholds", {}),
             "weights": cfg_blob.get("weights", {}),
         }
-        # Make sure result is serializable (should already be)
         try:
             json.dumps(result, ensure_ascii=False)
         except TypeError:
-            # If something sneaks in, coerce via str()
             result = json.loads(json.dumps(result, default=str, ensure_ascii=False))
 
+        ts_utc = datetime.now(timezone.utc).isoformat()
         audit = {
             "schema_version": "1.0",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": ts_utc,        # keep 'timestamp' for backward-compat
+            "timestamp_utc": ts_utc,    # explicit key required by tests
             "config_snapshot": cfg_blob,
             "run_context": ctx_meta,
             "result": result,
