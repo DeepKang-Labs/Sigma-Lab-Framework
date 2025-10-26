@@ -1,26 +1,7 @@
-Parfait — on termine proprement en priorisant la réussite des tests.
-Voici le fichier complet sigma_lab_v4_2.py déjà patché pour :
-
-ajouter timestamp_utc dans l’audit (exigé par tests/test_core.py)
-
-inclure une clef audit dans le résultat de diagnose (exigé par tests/test_resilience.py)
-
-garder toutes les tolérances que nous avions introduites (coercion des stakeholders, valeurs hors [0,1] clampées, etc.)
-
-garantir une sérialisation JSON sûre (tout transformé en dict natifs)
-
-
-Copie-colle tel quel et remplace ton fichier existant.
-
-
----
-
-sigma_lab_v4_2.py (version finale patchée)
-
 #!/usr/bin/env python3
 # ============================================================
-# Sigma-Lab v4.2 — Procedural Diagnostic Core (MIT)
-# Patched: audit 'timestamp_utc' + result['audit'] + robust JSON
+# Sigma-Lab v4.2 - Procedural Diagnostic Core (MIT)
+# Patched: add 'timestamp_utc' in audit and inline 'audit' in results
 # ============================================================
 
 from __future__ import annotations
@@ -116,20 +97,23 @@ class SigmaLab:
     # ----- config & demo -----
 
     def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        # defaults
         cfg = {
-            "weights": asdict(Weights(provenance=Provenance("Hospital Ethics Board", "POL-H-12",
-                                                            "Clinical prioritization policy"))),
-            "thresholds": asdict(Thresholds(provenance=Provenance("Hospital Ethics Board", "POL-H-09",
-                                                                  "Harm floors & irreversibility veto"))),
+            "weights": asdict(Weights(provenance=Provenance(
+                "Hospital Ethics Board", "POL-H-12", "Clinical prioritization policy"
+            ))),
+            "thresholds": asdict(Thresholds(provenance=Provenance(
+                "Hospital Ethics Board", "POL-H-09", "Harm floors & irreversibility veto"
+            ))),
             "harm_model": {
                 "base_weight": 0.7,
                 "irreversibility_weight": 0.3,
-                "base_agg": "max",         # "max" | "mean" | "weighted"
-                "base_agg_weight": 0.5,    # used if base_agg == "weighted"
+                "base_agg": "max",        # "max" | "mean" | "weighted"
+                "base_agg_weight": 0.5,   # used when base_agg == "weighted"
                 "formula": "expected_harm = base_risk * clamp(base_weight + irreversibility_weight * irreversibility)",
-                "rationale": ("Expected-utility style amplification: irreversibility raises "
-                              "effective risk. base_risk aggregated via max/mean/weighted (configurable)."),
+                "rationale": (
+                    "Expected-utility style amplification: irreversibility raises effective risk. "
+                    "base_risk aggregated via max/mean/weighted (configurable)."
+                ),
             },
             "stability_model": {"mean_weight": 0.6, "max_weight": 0.4},
             "resilience_model": {"avg_weight": 0.85, "breadth_weight": 0.15},
@@ -146,7 +130,6 @@ class SigmaLab:
             },
             "verdict_acceptance_threshold": 0.65,
         }
-        # overlay provided config (shallow)
         for k, v in (config or {}).items():
             cfg[k] = v
         # ensure provenance are dicts
@@ -189,28 +172,22 @@ class SigmaLab:
                     vulnerability=clamp(s.get("vulnerability", 0.5)),
                     impact_benefit=clamp(s.get("impact_benefit", 0.5)),
                 ))
-            else:  # string or other
+            else:
                 out.append(Stakeholder(str(s), 0.5, 0.5))
         return out
 
     def validate_context(self, ctx: OptionContext) -> List[str]:
         errs: List[str] = []
-
-        # coerce risks
         st = clamp(ctx.short_term_risk if ctx.short_term_risk is not None else 0.5)
         lt = clamp(ctx.long_term_risk if ctx.long_term_risk is not None else 0.5)
         irr = clamp(ctx.irreversibility_risk if ctx.irreversibility_risk is not None else 0.5)
-
         ctx.short_term_risk = st
         ctx.long_term_risk = lt
         ctx.irreversibility_risk = irr
-
-        # stakeholders
         ctx.stakeholders = self._coerce_stakeholders(ctx.stakeholders)
+        return errs
 
-        return errs  # we do not fail on out-of-range; we clamp above
-
-    # ----- scoring models -----
+    # ----- value models -----
 
     def _value_non_harm(self, expected_harm: float) -> float:
         vf = self.cfg["value_functions"]["non_harm"]
@@ -221,19 +198,17 @@ class SigmaLab:
         return clamp(1.0 - expected_harm)
 
     def _value_stability(self, val: float) -> float:
-        return clamp(val)  # linear
+        return clamp(val)
 
     def _value_resilience(self, avg: float, breadth: float) -> float:
         pw = self.cfg["value_functions"]["resilience"]["params"]["points"]
-        # simple piecewise linear between given points
         x = clamp(avg)
         for (x1, y1), (x2, y2) in zip(pw[:-1], pw[1:]):
             if x1 <= x <= x2:
                 if x2 == x1:
                     return clamp(y1)
                 t = (x - x1) / (x2 - x1)
-                y = y1 + t * (y2 - y1)
-                return clamp(y)
+                return clamp(y1 + t * (y2 - y1))
         return clamp(pw[-1][1])
 
     def _value_equity(self, benefits: List[float]) -> float:
@@ -244,9 +219,8 @@ class SigmaLab:
 
     def diagnose(self, ctx: OptionContext, verdict_opt_in: bool = True) -> Dict[str, Any]:
         warnings: List[str] = []
-        input_errors = self.validate_context(ctx)  # will coerce
+        input_errors = self.validate_context(ctx)
 
-        # base risk aggregation
         st, lt, irr = ctx.short_term_risk, ctx.long_term_risk, ctx.irreversibility_risk
         hm = self.cfg["harm_model"]
         base_agg = hm.get("base_agg", "max")
@@ -255,13 +229,12 @@ class SigmaLab:
         elif base_agg == "weighted":
             w = clamp(hm.get("base_agg_weight", 0.5))
             base_risk = clamp(w * st + (1 - w) * lt)
-        else:  # max
+        else:
             base_risk = max(st, lt)
 
         expected_harm = clamp(base_risk * clamp(hm.get("base_weight", 0.7) +
                                                 hm.get("irreversibility_weight", 0.3) * irr))
 
-        # stability & resilience
         st_mod = self.cfg["stability_model"]
         st_val = clamp(st_mod.get("mean_weight", 0.6) * (st + lt) / 2.0 +
                        st_mod.get("max_weight", 0.4) * max(st, lt))
@@ -271,11 +244,9 @@ class SigmaLab:
         res_breadth = clamp(len([v for v in ctx.resilience_features.values() if v > 0.5]) /
                             max(1, len(ctx.resilience_features)))
 
-        # equity via stakeholders benefits
         benefits = [clamp(s.impact_benefit) for s in ctx.stakeholders]
         eq_val = self._value_equity(benefits)
 
-        # value transforms
         scores = {
             "non_harm": self._value_non_harm(expected_harm),
             "stability": self._value_stability(1.0 - st_val if st_val > 0.5 else 1.0 - 0.5 * st_val),
@@ -318,11 +289,10 @@ class SigmaLab:
                 "note": "Procedural diagnostic only. No moral truth claim.",
                 "verdict_threshold": self.cfg.get("verdict_acceptance_threshold", 0.65),
             },
-            # demanded by tests
             "diagnostic": {"scores": scores, "vetoes": vetoes},
         }
 
-        # Minimal inline audit (also demanded by tests)
+        # Inline audit required by tests
         result["audit"] = {
             "timestamp_utc": ts,
             "weights": self.cfg["weights"],
@@ -335,7 +305,6 @@ class SigmaLab:
     # ----- audit export -----
 
     def export_audit_trail(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        # Ensure everything is JSON-safe dictionaries
         weights = self.cfg.get("weights", {})
         thresholds = self.cfg.get("thresholds", {})
 
@@ -359,12 +328,12 @@ class SigmaLab:
         audit = {
             "schema_version": "1.0",
             "timestamp": now_iso_utc(),
-            "timestamp_utc": now_iso_utc(),  # explicit key required by tests
+            "timestamp_utc": now_iso_utc(),
             "config_snapshot": cfg_blob,
             "run_context": run_ctx,
             "result": result,
         }
-        # sanity: ensure JSON serializable (will raise if something bad)
+        # sanity JSON
         json.loads(json.dumps(audit, ensure_ascii=False, sort_keys=True))
         return audit
 
@@ -373,31 +342,3 @@ class SigmaLab:
 def demo_context(domain: str = "public"):
     lab = SigmaLab({})
     return lab._normalize_config({}), SigmaLab.demo_context(domain)[1]
-
-
----
-
-Message de commit (recommandé)
-
-Title
-fix(core): add timestamp_utc in audit + embed inline audit in diagnose result
-
-Extended description
-
-- Adds explicit `timestamp_utc` field to `export_audit_trail` (required by tests/test_core.py)
-- Embeds a minimal `result["audit"]` block in `diagnose`, as expected by tests/test_resilience.py
-- Keeps tolerant context handling:
-  • clamps risks into [0,1]
-  • coerces string stakeholders to Stakeholder objects
-  • never raises on minor input issues; uses warnings instead
-- Ensures JSON-safe audit payloads (native dicts only + sanity json.dumps/loads)
-
-
----
-
-Tu n’as rien d’autre à changer dans le smoke pour ce patch.
-
-Lance ton workflow : il doit passer les deux assertions manquantes.
-
-Si un autre test réclame un champ supplémentaire, envoie-moi l’erreur brute et je te repasse un fichier complet prêt à coller.
-
