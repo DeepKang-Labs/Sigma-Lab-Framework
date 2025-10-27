@@ -1,0 +1,16 @@
+version: "1.0"
+discovery_date: "YYYY-MM-DD"
+
+decision_points:
+  - decision_id: "skyfleet_alpha_001"
+    description: "Upgrade prioritization for Skywire testnet nodes"
+    context: "Skyfleet community must decide whether to allocate bandwidth upgrades to relay or edge nodes first."
+    stakeholders: ["node_operators", "developers", "community_users"]
+    governance_dimensions:
+      technical_complexity: 0  # 0–10
+      economic_impact: 0       # 0–10
+      user_experience_impact: 0
+      security_implications: 0
+    evaluator_notes:
+      evaluator_1: ""
+      evaluator_2: ""
