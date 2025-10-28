@@ -11,12 +11,14 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # 1) Repo
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
 
+      # 2) Python + tools
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -30,10 +32,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
+      # 3) Horodatage (pour arborescence data/YYYY-MM-DD)
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
+      # 4) Endpoints + fichier PKs cible (via $GITHUB_ENV)
       - name: Define endpoints env
         run: |
           echo "EXPLORER_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply" >> "$GITHUB_ENV"
@@ -41,14 +45,21 @@ jobs:
           echo "FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics" >> "$GITHUB_ENV"
           echo "VISORS_PKS_FILE=.tmp/visors_pks.txt" >> "$GITHUB_ENV"
 
+      # 5) Auto-discovery tolérant des PKs (n'échoue pas si SD renvoie null)
       - name: Build .tmp/visors_pks.txt (auto-discovery)
         run: |
           set -euo pipefail
           mkdir -p .tmp
           echo "# Auto-discovered PKs list" > .tmp/visors_pks.txt
-          curl -sS "https://sd.skycoin.com/api/services?type=visor" | jq -r '.[].pk?' | sed '/^null$/d;/^$/d' >> .tmp/visors_pks.txt
-          echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
+          json=$(curl -fsSL "https://sd.skycoin.com/api/services?type=visor" || echo "null")
+          if echo "$json" | jq -e 'type=="array"' > /dev/null 2>&1; then
+            echo "$json" | jq -r '.[].pk?' | sed '/^null$/d;/^$/d' >> .tmp/visors_pks.txt
+            echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
+          else
+            echo "[Warn] No valid array returned by Skycoin SD API, skipping PK auto-discovery."
+          fi
 
+      # 6) Collecte: JSON + Markdown
       - name: Run VitalSigns (produce JSON + Markdown)
         env:
           TODAY: ${{ steps.date.outputs.date }}
@@ -56,8 +67,9 @@ jobs:
           set -euo pipefail
           mkdir -p "data/${TODAY}"
           python scripts/skywire_vitals.py
-          echo "Wrote vital data for ${TODAY}"
+          echo "✅ Wrote vital data for ${TODAY}"
 
+      # 7) Artefact privé: JSON brut
       - name: Upload RAW JSON (private artifact)
         if: always()
         uses: actions/upload-artifact@v4
@@ -67,13 +79,42 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # 8) Sanitize (version robuste via fichier temporaire)
       - name: Sanitize JSON (remove sensitive data)
         env:
           TODAY: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          python scripts/sanitize_vitals.py
+          mkdir -p .tmp
+          cat > .tmp/sanitize.py <<'PY'
+          import os, json, sys
+          today = os.getenv("TODAY")
+          p = f"data/{today}/skywire_vitals.json"
+          q = f"data/{today}/skywire_vitals_sanitized.json"
 
+          try:
+              with open(p) as f:
+                  doc = json.load(f)
+          except FileNotFoundError:
+              print("⚠️ No raw JSON found.")
+              sys.exit(0)
+
+          for g in doc.get("groups", []):
+              if g.get("name") == "nodes":
+                  # never publish PK list
+                  g["visors_pks"] = []
+                  s = g.get("summary", {}) or {}
+                  if "ut_note" in s:
+                      s["ut_note"] = "(redacted)"
+                  g["summary"] = s
+
+          with open(q, "w") as f:
+              json.dump(doc, f, indent=2, ensure_ascii=False)
+          print(f"✅ Sanitized written: {q}")
+          PY
+          python .tmp/sanitize.py
+
+      # 9) Artefact privé: JSON épuré (pour audit hors-repo)
       - name: Upload SANITIZED JSON (private artifact)
         if: always()
         uses: actions/upload-artifact@v4
@@ -83,6 +124,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # 10) Commit & push Markdown + JSON public si présents
       - name: Commit & push summary (rebase-safe)
         env:
           TODAY: ${{ steps.date.outputs.date }}
@@ -91,6 +133,6 @@ jobs:
           git config user.name  "sigma-bot"
           git config user.email "sigma-bot@deepkang.labs"
           git add -A
-          git commit -m "chore(data): Skywire VitalSigns daily snapshot for ${TODAY}" || echo "No changes to commit."
-          git pull --rebase
+          git commit -m "chore(data): Skywire VitalSigns daily snapshot for ${TODAY}" || true
+          git pull --rebase --autostash
           git push
