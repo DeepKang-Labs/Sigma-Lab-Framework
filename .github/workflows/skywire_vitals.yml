@@ -3,7 +3,7 @@ name: skywire-vitals
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 4 * * *"  # daily @ 04:17 UTC
+    - cron: "17 4 * * *" # daily @ 04:17 UTC
 
 permissions:
   contents: write
@@ -101,51 +101,48 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # --- robust sanitize: write Python file then run (no heredoc pitfalls) ---
+      # ---- SANITIZE: run Python directly (no heredoc) ----
       - name: Sanitize JSON (remove sensitive data)
+        shell: python
         env:
           TODAY: ${{ steps.date.outputs.today }}
         run: |
-          set -e
-          mkdir -p .tmp
-          cat > .tmp/sanitize.py <<'PY'
-import os, json, sys
+          import os, json, sys, pathlib
+          TODAY = os.environ.get("TODAY")
+          p = f"data/{TODAY}/skywire_vitals.json"
+          q = f"data/{TODAY}/skywire_vitals_sanitized.json"
+          try:
+              with open(p, "r") as f:
+                  doc = json.load(f)
+          except FileNotFoundError:
+              print("No raw JSON found; skipping sanitize.")
+              sys.exit(0)
 
-TODAY = os.environ.get("TODAY")
-p = f"data/{TODAY}/skywire_vitals.json"
-q = f"data/{TODAY}/skywire_vitals_sanitized.json"
+          for g in doc.get("groups", []):
+              if g.get("name") == "public":
+                  s = g.get("summary", {}) or {}
+                  samples = s.get("samples", {}) or {}
+                  if isinstance(samples, dict):
+                      for k, v in list(samples.items()):
+                          if isinstance(v, list):
+                              samples[k] = len(v)
+                  for it in g.get("payloads", []) or []:
+                      for k in list(it.keys()):
+                          if k not in ("__url__", "__ok__", "__status__"):
+                              del it[k]
+                  g["summary"] = s
 
-try:
-    with open(p, "r") as f:
-        doc = json.load(f)
-except FileNotFoundError:
-    print("No raw JSON found; skipping sanitize.")
-    sys.exit(0)
+              if g.get("name") == "nodes":
+                  g["visors_pks"] = []
+                  s = g.get("summary", {}) or {}
+                  if "ut_note" in s:
+                      s["ut_note"] = "(redacted)"
+                  g["summary"] = s
 
-for g in doc.get("groups", []):
-    if g.get("name") == "public":
-        s = g.get("summary", {})
-        samples = s.get("samples", {})
-        if isinstance(samples, dict):
-            for k, v in list(samples.items()):
-                if isinstance(v, list):
-                    samples[k] = len(v)
-        for it in g.get("payloads", []):
-            for k in list(it.keys()):
-                if k not in ("__url__", "__ok__", "__status__"):
-                    del it[k]
-    if g.get("name") == "nodes":
-        g["visors_pks"] = []
-        s = g.get("summary", {}) or {}
-        if "ut_note" in s:
-            s["ut_note"] = "(redacted)"
-        g["summary"] = s
-
-with open(q, "w") as f:
-    json.dump(doc, f, indent=2, ensure_ascii=False)
-print(f"Sanitized written: {q}")
-PY
-          python .tmp/sanitize.py
+          pathlib.Path(q).parent.mkdir(parents=True, exist_ok=True)
+          with open(q, "w") as f:
+              json.dump(doc, f, indent=2, ensure_ascii=False)
+          print(f"Sanitized written: {q}")
 
       - name: Upload SANITIZED JSON (private artifact)
         if: always()
