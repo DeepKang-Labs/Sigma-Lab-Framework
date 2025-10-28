@@ -26,11 +26,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install requests pyyaml
-          fi
+          pip install requests pyyaml jq
           sudo apt-get update
           sudo apt-get install -y jq curl
 
@@ -38,7 +34,6 @@ jobs:
         id: date
         run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
-      # --------- Endpoints & defaults ----------
       - name: Define endpoints env
         run: |
           echo "SKYWIRE_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply" >> $GITHUB_ENV
@@ -48,7 +43,6 @@ jobs:
           echo "UT_SAMPLE_MODE=${{ vars.UT_SAMPLE_MODE || 'random' }}" >> $GITHUB_ENV
           echo "PYTHONUNBUFFERED=1" >> $GITHUB_ENV
 
-      # --------- Auto-discovery des visors (PKs) ----------
       - name: Fetch public visors PKs (auto-discovery)
         id: visors
         run: |
@@ -83,7 +77,6 @@ jobs:
           python scripts/skywire_vitals.py
           echo "Wrote data/${TODAY}/skywire_vitals.json and data/${TODAY}/skywire_summary.md"
 
-      # --------- Artefacts privés (audit) ----------
       - name: Upload RAW JSON (private artifact)
         if: always()
         uses: actions/upload-artifact@v4
@@ -93,7 +86,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # --------- Sanitize JSON en place sûre ----------
       - name: Sanitize JSON (remove sensitive data)
         env:
           TODAY: ${{ steps.date.outputs.today }}
@@ -110,7 +102,6 @@ jobs:
           except FileNotFoundError:
               print("No raw JSON found; skipping sanitize.")
               sys.exit(0)
-
           for g in doc.get("groups", []):
               if g.get("name") == "public":
                   s = g.get("summary", {})
@@ -124,12 +115,11 @@ jobs:
                           if k not in ("__url__", "__ok__", "__status__"):
                               del it[k]
               if g.get("name") == "nodes":
-                  g["visors_pks"] = []             # on ne publie jamais les PK dans le repo
+                  g["visors_pks"] = []
                   s = g.get("summary", {}) or {}
                   if "ut_note" in s:
                       s["ut_note"] = "(redacted)"
                   g["summary"] = s
-
           with open(q, "w") as f:
               json.dump(doc, f, indent=2, ensure_ascii=False)
           print(f"Sanitized written: {q}")
@@ -144,7 +134,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # --------- Commit du rapport MD ----------
       - name: Commit & push summary (rebase-safe)
         if: success()
         env:
