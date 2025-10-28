@@ -4,7 +4,8 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 03 * * *"  # daily 03:17 UTC
-    permissions:
+    
+permissions:
   contents: write #pushbot
 
 jobs:
