@@ -1,15 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="154" height="20" role="img" aria-label="success ratio: 100.0%">
+<svg xmlns="http://www.w3.org/2000/svg" width="136" height="20" role="img" aria-label="success ratio: n/a">
   <linearGradient id="a" x2="0" y2="100%">
     <stop offset="0" stop-color="#fff" stop-opacity=".7"/>
     <stop offset=".1" stop-opacity=".1"/>
     <stop offset=".9" stop-opacity=".1"/>
   </linearGradient>
-  <rect rx="3" width="154" height="20" fill="#555"/>
-  <rect rx="3" x="98" width="56" height="20" fill="#2ea44f"/>
-  <path fill="#2ea44f" d="M98 0h4v20h-4z"/>
-  <rect rx="3" width="154" height="20" fill="url(#a)"/>
+  <rect rx="3" width="136" height="20" fill="#555"/>
+  <rect rx="3" x="98" width="38" height="20" fill="#6c757d"/>
+  <path fill="#6c757d" d="M98 0h4v20h-4z"/>
+  <rect rx="3" width="136" height="20" fill="url(#a)"/>
   <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
     <text x="49.0" y="14">success ratio</text>
-    <text x="126.0" y="14">100.0%</text>
+    <text x="117.0" y="14">n/a</text>
   </g>
 </svg>
