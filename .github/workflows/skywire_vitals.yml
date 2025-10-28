@@ -3,7 +3,7 @@ name: Skywire VitalSigns
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 03 * * *"   # daily 03:17 UTC
+    - cron: "17 03 * * *"  # daily 03:17 UTC
 
 jobs:
   vitals:
@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies (pip + jq)
+      - name: Install dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -46,9 +46,7 @@ jobs:
           set -euo pipefail
           mkdir -p .tmp
           echo "# Auto-discovered PKs list" > .tmp/visors_pks.txt
-          curl -sS "https://sd.skycoin.com/api/services?type=visor" \
-            | jq -r '.[].pk?' \
-            | sed '/^null$/d;/^$/d' >> .tmp/visors_pks.txt
+          curl -sS "https://sd.skycoin.com/api/services?type=visor" | jq -r '.[].pk?' | sed '/^null$/d;/^$/d' >> .tmp/visors_pks.txt
           echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
 
       - name: Run VitalSigns (produce JSON + Markdown)
@@ -90,8 +88,7 @@ except FileNotFoundError:
 
 for g in doc.get("groups", []):
     if g.get("name") == "nodes":
-        # never publish PK list
-        g["visors_pks"] = []
+        g["visors_pks"] = []  # never publish PK list
         s = g.get("summary", {}) or {}
         if "ut_note" in s:
             s["ut_note"] = "(redacted)"
@@ -99,6 +96,7 @@ for g in doc.get("groups", []):
 
 with open(q, "w") as f:
     json.dump(doc, f, indent=2, ensure_ascii=False)
+
 print(f"✅ Sanitized written: {q}")
 PY
 
