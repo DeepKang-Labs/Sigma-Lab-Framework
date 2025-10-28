@@ -3,7 +3,10 @@ name: Skywire VitalSigns
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 03 * * *" # Exécution quotidienne à 03:17 UTC
+    - cron: "17 03 * * *"   # daily 03:17 UTC
+
+permissions:
+  contents: write   # nécessaire pour push avec GITHUB_TOKEN
 
 jobs:
   vitals:
@@ -46,8 +49,13 @@ jobs:
           set -euo pipefail
           mkdir -p .tmp
           echo "# Auto-discovered PKs list" > .tmp/visors_pks.txt
-          curl -sS "https://sd.skycoin.com/api/services?type=visor" | jq -r '.[].pk? // empty' > .tmp/visors_pks.txt
-          echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
+          # Récupère la liste des visors; si vide/erreur, on log un warn mais on continue
+          if curl -fsS "https://sd.skycoin.com/api/services?type=visor" \
+            | jq -er 'map(.pk?) | map(select(.!=null)) | .[]' >> .tmp/visors_pks.txt; then
+            echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
+          else
+            echo "[Warn] PKs auto-discovery failed or returned empty list."
+          fi
 
       - name: Run VitalSigns (produce JSON + Markdown)
         env:
@@ -67,7 +75,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # ----------- SANITIZE JSON (remove sensitive data) -----------
+      # -------- SANITIZE (version sûre via fichier temporaire) --------
       - name: Sanitize JSON (remove sensitive data)
         env:
           TODAY: ${{ steps.date.outputs.date }}
@@ -75,32 +83,34 @@ jobs:
           set -euo pipefail
           mkdir -p .tmp
           cat > .tmp/sanitize.py <<'PY'
-import os, json, sys
+          import os, json, sys
 
-today = os.getenv("TODAY")
-p = f"data/{today}/skywire_vitals.json"
-q = f"data/{today}/skywire_vitals_sanitized.json"
+          today = os.getenv("TODAY")
+          p = f"data/{today}/skywire_vitals.json"
+          q = f"data/{today}/skywire_vitals_sanitized.json"
 
-try:
-    with open(p) as f:
-        doc = json.load(f)
-except FileNotFoundError:
-    print("⚠️ No raw JSON found.")
-    sys.exit(0)
+          try:
+              with open(p) as f:
+                  doc = json.load(f)
+          except FileNotFoundError:
+              print("⚠️ No raw JSON found.")
+              sys.exit(0)
 
-for g in doc.get("groups", []):
-    if g.get("name") == "nodes":
-        g["visors_pks"] = []  # never publish PK list
-        s = g.get("summary", {}) or {}
-        if "ut_note" in s:
-            s["ut_note"] = "(redacted)"
-        g["summary"] = s
+          for g in doc.get("groups", []):
+              if g.get("name") == "nodes":
+                  # ne jamais publier la liste de PK
+                  g["visors_pks"] = []
+                  s = g.get("summary", {}) or {}
+                  if "ut_note" in s:
+                      s["ut_note"] = "(redacted)"
+                  g["summary"] = s
 
-with open(q, "w") as f:
-    json.dump(doc, f, indent=2, ensure_ascii=False)
+          with open(q, "w") as f:
+              json.dump(doc, f, indent=2, ensure_ascii=False)
 
-print(f"✅ Sanitized written: {q}")
-PY
+          print(f"✅ Sanitized written: {q}")
+          PY
+
           python .tmp/sanitize.py
 
       - name: Upload SANITIZED JSON (private artifact)
@@ -117,9 +127,9 @@ PY
           TODAY: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          git config user.name  "DeepKang-Labs Bot"
-          git config user.email "bot@deepkang-labs.local"
+          git config user.name  "sigma-bot"
+          git config user.email "actions@github.com"
           git add -A
           git commit -m "chore(data): Skywire VitalSigns daily snapshot for ${TODAY}" || echo "No changes to commit."
-          git pull --rebase
+          git pull --rebase --autostash
           git push
