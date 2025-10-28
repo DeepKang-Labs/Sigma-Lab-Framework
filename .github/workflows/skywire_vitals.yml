@@ -1,60 +1,62 @@
-name: Skywire Vitals
+name: Skywire VitalSigns
 
 on:
-  schedule:
-    - cron: "0 3 * * *"
   workflow_dispatch:
+  schedule:
+    - cron: "17 03 * * *"   # daily 03:17 UTC
 
 jobs:
   vitals:
     runs-on: ubuntu-latest
-    name: Collect Skywire VitalSigns
+    timeout-minutes: 15
 
     steps:
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install dependencies (pip + jq)
         run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
           python -m pip install --upgrade pip
           pip install requests
 
       - name: Date stamp (UTC)
         id: date
-        run: echo "date=$(date -u +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        run: echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
       - name: Define endpoints env
         run: |
-          echo "EXPLORER_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply" >> $GITHUB_ENV
-          echo "PUBLIC_ENDPOINTS=https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/" >> $GITHUB_ENV
-          echo "FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics" >> $GITHUB_ENV
-          echo "VISORS_PKS_FILE=.tmp/visors_pks.txt" >> $GITHUB_ENV
+          echo "EXPLORER_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply" >> "$GITHUB_ENV"
+          echo "PUBLIC_ENDPOINTS=https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/" >> "$GITHUB_ENV"
+          echo "FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics" >> "$GITHUB_ENV"
+          echo "VISORS_PKS_FILE=.tmp/visors_pks.txt" >> "$GITHUB_ENV"
 
       - name: Build .tmp/visors_pks.txt (auto-discovery)
         run: |
+          set -euo pipefail
           mkdir -p .tmp
           echo "# Auto-discovered PKs list" > .tmp/visors_pks.txt
-          curl -s "https://sd.skycoin.com/api/services?type=visor" | jq -r '.[].pk?' >> .tmp/visors_pks.txt || true
+          curl -sS "https://sd.skycoin.com/api/services?type=visor" \
+            | jq -r '.[].pk?' \
+            | sed '/^null$/d;/^$/d' >> .tmp/visors_pks.txt
           echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
-
-      - name: Normalize env (comma lists -> files)
-        run: |
-          echo "Normalized env OK"
 
       - name: Run VitalSigns (produce JSON + Markdown)
         env:
           TODAY: ${{ steps.date.outputs.date }}
         run: |
-          set -euxo pipefail
-          mkdir -p data/${TODAY}
+          set -euo pipefail
+          mkdir -p "data/${TODAY}"
           python scripts/skywire_vitals.py
           echo "✅ Wrote vital data for ${TODAY}"
 
@@ -64,6 +66,7 @@ jobs:
         with:
           name: skywire_vitals_raw_${{ steps.date.outputs.date }}
           path: data/${{ steps.date.outputs.date }}/skywire_vitals.json
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Sanitize JSON (remove sensitive data)
@@ -87,8 +90,9 @@ except FileNotFoundError:
 
 for g in doc.get("groups", []):
     if g.get("name") == "nodes":
+        # never publish PK list
         g["visors_pks"] = []
-        s = g.get("summary", {})
+        s = g.get("summary", {}) or {}
         if "ut_note" in s:
             s["ut_note"] = "(redacted)"
         g["summary"] = s
@@ -104,17 +108,17 @@ PY
         with:
           name: skywire_vitals_sanitized_${{ steps.date.outputs.date }}
           path: data/${{ steps.date.outputs.date }}/skywire_vitals_sanitized.json
-          retention-days: 30
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Commit & push summary (rebase-safe)
         env:
           TODAY: ${{ steps.date.outputs.date }}
         run: |
-          set -euxo pipefail
-          git config user.name "Sigma-Bot"
-          git config user.email "bot@sigmalab.local"
-          git add "data/${TODAY}/skywire_summary.md" || true
-          git add "data/${TODAY}/skywire_vitals.json" || true
-          git commit -m "chore(data): Skywire VitalSigns daily snapshot" || true
+          set -euo pipefail
+          git config user.name  "sigma-bot"
+          git config user.email "sigma-bot@deepkang.labs"
+          git add -A
+          git commit -m "chore(data): Skywire VitalSigns daily snapshot for ${TODAY}" || echo "No changes to commit."
           git pull --rebase
           git push
