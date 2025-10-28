@@ -1,0 +1,34 @@
+{
+  "date": "2025-10-28",
+  "sources": [
+    "https://explorer.skycoin.com/api/blockchain/metadata",
+    "https://explorer.skycoin.com/api/coinSupply",
+    "https://explorer.skycoin.com/api/transactions"
+  ],
+  "metrics_per_source": [
+    {
+      "nodes_active": null,
+      "latency_ms_avg": null,
+      "uptime_ratio_avg": null,
+      "success_ratio": 1.0,
+      "proxy_activity": null
+    },
+    {
+      "nodes_active": null,
+      "latency_ms_avg": null,
+      "uptime_ratio_avg": null,
+      "success_ratio": 1.0,
+      "proxy_activity": null
+    }
+  ],
+  "aggregate": {
+    "nodes_active_est": null,
+    "latency_ms_avg": null,
+    "uptime_ratio_avg": null,
+    "success_ratio_avg": 1.0,
+    "proxy_activity_sum": null
+  },
+  "errors": {
+    "https://explorer.skycoin.com/api/transactions": "HTTPSConnectionPool(host='explorer.skycoin.com', port=443): Read timed out. (read timeout=20)"
+  }
+}
