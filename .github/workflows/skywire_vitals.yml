@@ -1,10 +1,9 @@
-name: skywire-vitals (double-channel)
+name: skywire-vitals
 
 on:
   workflow_dispatch:
   schedule:
-    # 2x par jour (UTC)
-    - cron: "7 3,15 * * *"
+    - cron: "14 3 * * *"  # exécution quotidienne à 03:14 UTC
 
 permissions:
   contents: write
@@ -14,152 +13,183 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # --------- Défauts sûrs (remplaçables via SECRETS) ----------
   PYTHONUNBUFFERED: "1"
-  REQUEST_TIMEOUT: "10"
+  UT_MAX_VISORS: "100"
+  UT_SAMPLE_MODE: "random"
+  VISORS_PKS_AUTO: "false"
+  VISORS_PKS: ""
 
-  # --------- Paramètres publics (OK en clair) ---------
-  # Explorer (supply / metadata)
-  SKYWIRE_ENDPOINTS: >-
-    https://explorer.skycoin.com/api/blockchain/metadata,
-    https://explorer.skycoin.com/api/coinSupply
-
-  # Infra publique (services -> proxy/vpn/transports/dmsg)
+  # Endpoints publics par défaut
+  SKYWIRE_ENDPOINTS: "https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply"
   SKYWIRE_PUBLIC_ENDPOINTS: >-
-    https://sd.skycoin.com/api/services?type=visor,
     https://sd.skycoin.com/api/services?type=proxy,
     https://sd.skycoin.com/api/services?type=vpn,
     https://tpd.skywire.skycoin.com/all-transports,
     https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,
     https://rf.skywire.skycoin.com/
-
-  # Fiber (peut répondre 404, conservé pour visibilité)
-  FIBER_ENDPOINTS: >-
-    https://fiber.skywire.dev/api/status,
-    https://fiber.skywire.dev/api/metrics
-
-  # Découverte UT (publique) — on ne publie pas les PK dans le repo
-  VISORS_PKS_AUTO: "true"
-  UT_MAX_VISORS: "200"
-  UT_SAMPLE_MODE: "random"
-
-  # Emplacements attendus (produits par scripts/skywire_vitals.py)
-  RAW_JSON_PATH: "data/$(date -u +'%Y-%m-%d')/skywire_vitals.json"
-  SUMMARY_MD_PATH: "data/$(date -u +'%Y-%m-%d')/skywire_summary.md"
+  SKYWIRE_NODE_ENDPOINTS: ""   # ex: https://<node-1>/api/health,https://<node-2>/api/metrics
+  FIBER_ENDPOINTS: "https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics"
 
 jobs:
   vitals:
+    name: vitals
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    # Secrets vides par défaut (utiles le jour où tu ajoutes des nœuds/PK privés)
-    env:
-      SKYWIRE_NODE_ENDPOINTS: ${{ secrets.SKYWIRE_NODE_ENDPOINTS }}
-      VISORS_PKS: ${{ secrets.VISORS_PKS }}
-
     steps:
+      # --- Date (pour chemins de sortie) ---
+      - id: date
+        name: Compute date (UTC)
+        run: echo "today=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      # --- Checkout complet (avec token pour push) ---
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # --- Python ---
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install requests orjson
+          set -e
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests pyyaml rich
+          fi
 
-      - name: Normalize env (compact comma lists)
-        shell: bash
+      # --- Fusion des secrets -> env (écrasent les défauts si présents) ---
+      - name: Normalize env (compact comma lists from secrets)
         run: |
-          for k in SKYWIRE_ENDPOINTS SKYWIRE_PUBLIC_ENDPOINTS FIBER_ENDPOINTS; do
-            v="$(echo "${!k}" | tr -s ' \n' ' ' | sed 's/, */,/g' | sed 's/^ *//;s/ *$//')"
-            echo "$k=$v" >> "$GITHUB_ENV"
-          done
-          # sécurise les paramètres numériques/flags
-          echo "UT_MAX_VISORS=${UT_MAX_VISORS:-200}" >> "$GITHUB_ENV"
-          echo "UT_SAMPLE_MODE=${UT_SAMPLE_MODE:-random}" >> "$GITHUB_ENV"
-          echo "VISORS_PKS_AUTO=${VISORS_PKS_AUTO:-true}" >> "$GITHUB_ENV"
+          set -e
+          set_kv () { key="$1"; val="$2"; [ -n "$val" ] && echo "$key=$val" >> "$GITHUB_ENV"; }
+          set_kv SKYWIRE_ENDPOINTS            "${{ secrets.SKYWIRE_ENDPOINTS }}"
+          set_kv SKYWIRE_PUBLIC_ENDPOINTS     "${{ secrets.SKYWIRE_PUBLIC_ENDPOINTS }}"
+          set_kv SKYWIRE_NODE_ENDPOINTS       "${{ secrets.SKYWIRE_NODE_ENDPOINTS }}"
+          set_kv FIBER_ENDPOINTS              "${{ secrets.FIBER_ENDPOINTS }}"
+          set_kv VISORS_PKS                   "${{ secrets.VISORS_PKS }}"
+          set_kv VISORS_PKS_AUTO              "${{ secrets.VISORS_PKS_AUTO }}"
+          set_kv UT_MAX_VISORS                "${{ secrets.UT_MAX_VISORS }}"
+          set_kv UT_SAMPLE_MODE               "${{ secrets.UT_SAMPLE_MODE }}"
 
       - name: Debug env
         run: |
-          echo "SKYWIRE_ENDPOINTS=${SKYWIRE_ENDPOINTS}"
-          echo "SKYWIRE_PUBLIC_ENDPOINTS=${SKYWIRE_PUBLIC_ENDPOINTS}"
-          echo "FIBER_ENDPOINTS=${FIBER_ENDPOINTS}"
-          echo "VISORS_PKS_AUTO=${VISORS_PKS_AUTO}"
-          echo "UT_MAX_VISORS=${UT_MAX_VISORS}"
+          echo "TODAY=${{ steps.date.outputs.today }}"
+          echo "SKYWIRE_ENDPOINTS=$SKYWIRE_ENDPOINTS"
+          echo "SKYWIRE_PUBLIC_ENDPOINTS=$SKYWIRE_PUBLIC_ENDPOINTS"
+          echo "SKYWIRE_NODE_ENDPOINTS=$SKYWIRE_NODE_ENDPOINTS"
+          echo "FIBER_ENDPOINTS=$FIBER_ENDPOINTS"
+          echo "VISORS_PKS_AUTO=$VISORS_PKS_AUTO"
+          echo "UT_MAX_VISORS=$UT_MAX_VISORS"
+          echo "UT_SAMPLE_MODE=$UT_SAMPLE_MODE"
 
+      # --- Génération des sorties (JSON brut + Markdown) ---
       - name: Run VitalSigns (produit JSON brut + Markdown)
-        shell: bash
+        env:
+          TODAY: ${{ steps.date.outputs.today }}
         run: |
           set -euo pipefail
-          test -f scripts/skywire_vitals.py
-          python scripts/skywire_vitals.py
-          # Vérification présence fichiers
-          test -f "${RAW_JSON_PATH}"
-          test -f "${SUMMARY_MD_PATH}"
+          mkdir -p "data/$TODAY"
+          # Le script produit:
+          #   data/$TODAY/skywire_vitals.json   (brut, non commité)
+          #   data/$TODAY/skywire_summary.md    (rapport MD, commité)
+          python scripts/skywire_vitals.py || true
+          echo "Wrote: data/$TODAY/skywire_vitals.json & data/$TODAY/skywire_summary.md"
 
-      # === Artefact privé : JSON brut complet (non publié dans le repo) ===
+      # --- Artefact privé (JSON brut) ---
       - name: Upload RAW JSON (private artifact)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skywire_vitals_raw_${{ github.run_id }}
-          path: ${{ env.RAW_JSON_PATH }}
-          retention-days: 7
+          name: skywire_vitals_raw_${{ steps.date.outputs.today }}
+          path: data/${{ steps.date.outputs.today }}/skywire_vitals.json
+          if-no-files-found: warn
+          retention-days: 14
 
-      # === Artefact privé : JSON nettoyé (agrégats, sans PK/adresses/samples) ===
+      # --- Sanitize JSON (épuré) ---
       - name: Produce sanitized JSON
-        shell: python
+        env:
+          TODAY: ${{ steps.date.outputs.today }}
         run: |
-          import os, orjson, pathlib
-          raw = pathlib.Path(os.environ["RAW_JSON_PATH"])
-          data = orjson.loads(raw.read_bytes())
+          set -e
+          IN="data/$TODAY/skywire_vitals.json"
+          OUT="data/$TODAY/skywire_vitals_sanitized.json"
+          python - << 'PY'
+import json, os, sys
+tod = os.environ["TODAY"]
+p = f"data/{tod}/skywire_vitals.json"
+q = f"data/{tod}/skywire_vitals_sanitized.json"
+try:
+    with open(p, "r") as f:
+        doc = json.load(f)
+except FileNotFoundError:
+    print("No raw JSON found; skipping sanitize.")
+    sys.exit(0)
 
-          def scrub_group(g):
-            g.pop("payloads", None)
-            g.pop("visors_pks", None)
-            s = g.get("summary")
-            if isinstance(s, dict) and "samples" in s:
-              s.pop("samples", None)
-            return g
+for g in doc.get("groups", []):
+    # Public: résumer les 'samples' en nombres pour la publication
+    if g.get("name") == "public":
+        summ = g.get("summary", {})
+        samp = summ.get("samples", {})
+        if isinstance(samp, dict):
+            for k, v in list(samp.items()):
+                if isinstance(v, list):
+                    samp[k] = len(v)
+        # réduire payloads à status uniquement
+        payloads = g.get("payloads", [])
+        for it in payloads:
+            for k in list(it.keys()):
+                if k not in ("__url__", "__ok__", "__status__"):
+                    del it[k]
+    # Nodes: ne jamais publier la liste des PK
+    if g.get("name") == "nodes":
+        g["visors_pks"] = []
+        s = g.get("summary", {})
+        if "ut_note" in s:
+            s["ut_note"] = "(redacted)"
 
-          data["groups"] = [scrub_group(g) for g in data.get("groups", [])]
-          safe = raw.with_name("skywire_vitals.sanitized.json")
-          safe.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
-          print(f"Sanitized JSON at: {safe}")
+with open(q, "w") as f:
+    json.dump(doc, f, indent=2, ensure_ascii=False)
+print("Sanitized written:", q)
+PY
 
+      # --- Artefact privé (sanitizé, pour vérif hors repo) ---
       - name: Upload SANITIZED JSON (private artifact)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: skywire_vitals_sanitized_${{ github.run_id }}
-          path: data/*/skywire_vitals.sanitized.json
-          retention-days: 7
+          name: skywire_vitals_sanitized_${{ steps.date.outputs.today }}
+          path: data/${{ steps.date.outputs.today }}/skywire_vitals_sanitized.json
+          if-no-files-found: warn
+          retention-days: 14
 
-      # === Canal public : on commit UNIQUEMENT le Markdown agrégé ===
+      # --- Commit/Pull/Push rebase-safe du Markdown public ---
       - name: Commit & push summary (rebase-safe)
-        shell: bash
+        env:
+          TODAY: ${{ steps.date.outputs.today }}
         run: |
           set -e
           git config user.name  "sigma-bot"
-          git config user.email "bot@deepkang.labs"
-          git add "${SUMMARY_MD_PATH}" || true
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-          git commit -m "chore(data): Skywire VitalSigns summary (public aggregates)"
-          git pull --rebase || true
-          git push
+          git config user.email "actions@github.com"
+          git add "data/$TODAY/skywire_summary.md"
+          git commit -m "chore(data): Skywire VitalSigns daily snapshot" || echo "No changes to commit"
+          # rebase-safe
+          git pull --rebase origin "${GITHUB_REF_NAME:-${GITHUB_HEAD_REF:-main}}" || true
+          git push origin HEAD:"${GITHUB_REF_NAME:-${GITHUB_HEAD_REF:-main}}" || true
 
-      # (Optionnel) Nettoyage local JSON avant fin du job, pour éviter tout commit futur accidentel
+      # --- Nettoyage des JSON dans le workspace du runner (sécurité) ---
       - name: Clean workspace JSON (safety)
+        if: always()
+        env:
+          TODAY: ${{ steps.date.outputs.today }}
         run: |
-          rm -f data/*/skywire_vitals.json data/*/skywire_vitals.sanitized.json || true
+          rm -f "data/$TODAY/skywire_vitals.json" || true
+          rm -f "data/$TODAY/skywire_vitals_sanitized.json" || true
 
       - name: Done
-        run: echo "Double-channel publishing completed."
+        run: echo "Skywire VitalSigns workflow finished."
