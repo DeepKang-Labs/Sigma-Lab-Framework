@@ -1,16 +1,17 @@
 # Skywire VitalSigns — 2025-10-28 UTC
+
 ## Explorer
 - Height: None
 - Current supply: 23490121.000000
 - Total supply: 25000000.000000
-- Coin Hours: 1109431396737
+- Coin Hours: 1109666884273
 
 ## Public Infra (Skywire)
 - Visors: 0
-- Proxies: 1324
-- VPN: 760
-- Transports: 44
-- DMSG entries: 0
+- Proxies: 1337
+- VPN: 763
+- Transports: 43
+- DMSG entries: 3037
 - RF status: 404 (ok=0)
 
 ## Nodes (if provided)

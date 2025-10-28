@@ -211,7 +211,7 @@
         ],
         "latency_avg_ms": null,
         "uptime_ratio_avg": null,
-        "ut_note": "No PK provided."
+        "ut_note": "(redacted)"
       },
       "visors_pks": []
     },
