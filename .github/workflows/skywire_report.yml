@@ -1,0 +1,35 @@
+name: skywire-report
+on:
+  schedule:
+    - cron: "10 6 * * *"   # chaque jour 06:10 UTC (après skywire-vitals à 06:05)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install pandas matplotlib
+
+      - name: Build Skywire Vital Report
+        run: |
+          python scripts/skywire_vital_report.py
+
+      - name: Commit report artifacts
+        run: |
+          git config user.name "sigma-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add reports/ || true
+          git commit -m "feat(report): Skywire Vital Report daily artifacts" || echo "no changes"
+          git push
