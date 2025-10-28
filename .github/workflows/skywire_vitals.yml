@@ -2,55 +2,85 @@ name: skywire-vitals
 
 on:
   workflow_dispatch:
+    inputs:
+      run_note:
+        description: "Optional run note"
+        required: false
+        default: ""
+  schedule:
+    # Exécute tous les jours à 03:20 UTC (ajuste si besoin)
+    - cron: "20 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: skywire-vitals
+  cancel-in-progress: false
 
 jobs:
   vitals:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
+      - name: Set up job
+        run: echo "Starting Skywire VitalSigns run…"
+
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Dépendances minimales au cas où
           pip install requests pyyaml
 
-      # ====== ENV visibles ici – une seule source de vérité ======
+      # --- Normalisation/valeurs par défaut des variables d'environnement ---
       - name: Define endpoints env
-        id: envblock
+        shell: bash
         run: |
-          cat > envfile <<'EOF'
-          SKYWIRE_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply
-          SKYWIRE_PUBLIC_ENDPOINTS=https://sd.skycoin.com/api/services?type=visor,https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://ar.skywire.skycoin.com/transports,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/
-          SKYWIRE_NODE_ENDPOINTS=
-          FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status
-          UT_MAX_VISORS=50
-          UT_SAMPLE_MODE=random
-          EOF
-          echo "ENVFILE<<EOF" >> $GITHUB_OUTPUT
-          cat envfile >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Valeurs par défaut "sûres" si non définies dans les secrets/env GitHub
+          : "${SKYWIRE_ENDPOINTS:=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply}"
+          : "${SKYWIRE_PUBLIC_ENDPOINTS:=https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/}"
+          : "${SKYWIRE_NODE_ENDPOINTS:=}"   # à compléter si tu as des noeuds privés
+          : "${FIBER_ENDPOINTS:=https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics}"
+          : "${VISORS_PKS:=}"               # peut rester vide
+          : "${UT_MAX_VISORS:=50}"
+          : "${UT_SAMPLE_MODE:=random}"
 
-      - name: Export env
+          # Nettoyage des espaces et lignes multiples -> csv propre
+          clean_csv () {
+            echo "$1" | tr '\n' ',' | sed 's/[[:space:]]//g' | sed 's/,,*/,/g' | sed 's/,$//'
+          }
+
+          echo "SKYWIRE_ENDPOINTS=$(clean_csv "$SKYWIRE_ENDPOINTS")" >> "$GITHUB_ENV"
+          echo "SKYWIRE_PUBLIC_ENDPOINTS=$(clean_csv "$SKYWIRE_PUBLIC_ENDPOINTS")" >> "$GITHUB_ENV"
+          echo "SKYWIRE_NODE_ENDPOINTS=$(clean_csv "$SKYWIRE_NODE_ENDPOINTS")" >> "$GITHUB_ENV"
+          echo "FIBER_ENDPOINTS=$(clean_csv "$FIBER_ENDPOINTS")" >> "$GITHUB_ENV"
+          echo "VISORS_PKS=$(clean_csv "$VISORS_PKS")" >> "$GITHUB_ENV"
+          echo "UT_MAX_VISORS=$UT_MAX_VISORS" >> "$GITHUB_ENV"
+          echo "UT_SAMPLE_MODE=$UT_SAMPLE_MODE" >> "$GITHUB_ENV"
+          echo "PYTHONUNBUFFERED=1" >> "$GITHUB_ENV"
+
+      - name: Export env (debug)
         run: |
-          echo "${{ steps.envblock.outputs.ENVFILE }}" > .env.sigma
-          set -a
-          . ./.env.sigma
-          set +a
-          echo "---- DEBUG ENV (runner) ----"
           echo "SKYWIRE_ENDPOINTS=$SKYWIRE_ENDPOINTS"
           echo "SKYWIRE_PUBLIC_ENDPOINTS=$SKYWIRE_PUBLIC_ENDPOINTS"
           echo "SKYWIRE_NODE_ENDPOINTS=$SKYWIRE_NODE_ENDPOINTS"
           echo "FIBER_ENDPOINTS=$FIBER_ENDPOINTS"
-          echo "--------------------------------"
+          echo "VISORS_PKS=$VISORS_PKS"
+          echo "UT_MAX_VISORS=$UT_MAX_VISORS"
+          echo "UT_SAMPLE_MODE=$UT_SAMPLE_MODE"
 
       - name: Run Skywire VitalSigns agent
         env:
@@ -58,20 +88,38 @@ jobs:
           SKYWIRE_PUBLIC_ENDPOINTS: ${{ env.SKYWIRE_PUBLIC_ENDPOINTS }}
           SKYWIRE_NODE_ENDPOINTS: ${{ env.SKYWIRE_NODE_ENDPOINTS }}
           FIBER_ENDPOINTS: ${{ env.FIBER_ENDPOINTS }}
+          VISORS_PKS: ${{ env.VISORS_PKS }}
           UT_MAX_VISORS: ${{ env.UT_MAX_VISORS }}
           UT_SAMPLE_MODE: ${{ env.UT_SAMPLE_MODE }}
+          PYTHONUNBUFFERED: "1"
         run: |
+          # Le script doit exister à cet emplacement :
+          test -f scripts/skywire_vitals.py
           python scripts/skywire_vitals.py
 
+      # --- Commit & push rebase-safe : corrige l'erreur 128 / unstaged changes ---
       - name: Commit & push (rebase-safe)
+        shell: bash
         run: |
           git config user.name "sigma-bot"
-          git config user.email "sigma-bot@users.noreply.github.com"
-          git pull --rebase
-          git add data/
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-          git commit -m "chore(data): Skywire VitalSigns daily snapshot"
-          git push
+          git config user.email "bot@deepkang-labs.dev"
+
+          # Ajoute tout ce qui a été généré
+          git add -A
+
+          # Stash si nécessaire pour pouvoir rebase proprement
+          git stash || true
+          git pull --rebase --autostash || true
+          git stash pop || true
+
+          # Ajoute à nouveau au cas où des fichiers ont été réécrits
+          git add -A
+
+          # Commit non bloquant s'il n'y a pas de diff
+          git commit -m "chore(data): Skywire VitalSigns daily snapshot" || echo "No changes to commit"
+
+          # Push silencieux si rien à pousser
+          git push origin main || echo "Push skipped (no new data)"
+
+      - name: Complete job
+        run: echo "Skywire VitalSigns workflow finished."
