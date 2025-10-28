@@ -4,14 +4,14 @@
 - Height: None
 - Current supply: 23490121.000000
 - Total supply: 25000000.000000
-- Coin Hours: 1109666884273
+- Coin Hours: 1109809149166
 
 ## Public Infra (Skywire)
 - Visors: 0
-- Proxies: 1337
-- VPN: 763
-- Transports: 43
-- DMSG entries: 3037
+- Proxies: 1345
+- VPN: 781
+- Transports: 1775
+- DMSG entries: 3046
 - RF status: 404 (ok=0)
 
 ## Nodes (if provided)

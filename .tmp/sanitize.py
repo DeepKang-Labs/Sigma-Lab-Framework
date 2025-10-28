@@ -1,4 +1,5 @@
 import os, json, sys
+
 today = os.getenv("TODAY")
 p = f"data/{today}/skywire_vitals.json"
 q = f"data/{today}/skywire_vitals_sanitized.json"
@@ -12,7 +13,7 @@ except FileNotFoundError:
 
 for g in doc.get("groups", []):
     if g.get("name") == "nodes":
-        # never publish PK list
+        # ne jamais publier la liste de PK
         g["visors_pks"] = []
         s = g.get("summary", {}) or {}
         if "ut_note" in s:
@@ -21,4 +22,5 @@ for g in doc.get("groups", []):
 
 with open(q, "w") as f:
     json.dump(doc, f, indent=2, ensure_ascii=False)
+
 print(f"✅ Sanitized written: {q}")
