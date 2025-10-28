@@ -3,7 +3,7 @@ name: skywire-vitals
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 4 * * *"  # Exécution quotidienne (UTC)
+    - cron: "17 4 * * *"  # daily @ 04:17 UTC
 
 permissions:
   contents: write
@@ -13,31 +13,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2) Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3) Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests pyyaml
 
-      # 4) Date UTC
       - name: Date stamp
         id: date
         run: echo "today=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
-      # 5) Define environment endpoints
       - name: Define endpoints env
         env:
           SKYWIRE_ENDPOINTS: ${{ secrets.SKYWIRE_ENDPOINTS }}
@@ -56,7 +51,6 @@ jobs:
           : "${VISORS_PKS:=}"
           : "${UT_MAX_VISORS:=50}"
           : "${UT_SAMPLE_MODE:=random}"
-
           {
             echo "SKYWIRE_ENDPOINTS=$SKYWIRE_ENDPOINTS"
             echo "SKYWIRE_PUBLIC_ENDPOINTS=$SKYWIRE_PUBLIC_ENDPOINTS"
@@ -67,7 +61,6 @@ jobs:
             echo "UT_SAMPLE_MODE=$UT_SAMPLE_MODE"
           } >> "$GITHUB_ENV"
 
-      # 6) Normalize lists
       - name: Normalize env (comma lists -> files)
         run: |
           set -e
@@ -80,7 +73,6 @@ jobs:
           tolist "${VISORS_PKS}" > .envlists/visors_pks.txt || true
           echo "VISORS_PK_COUNT=$(wc -l < .envlists/visors_pks.txt 2>/dev/null || echo 0)" >> "$GITHUB_ENV"
 
-      # 7) Debug (facultatif)
       - name: Debug env
         run: |
           echo "TODAY=${{ steps.date.outputs.today }}"
@@ -90,7 +82,6 @@ jobs:
           echo "Fiber endpoints:"; cat .envlists/fiber.txt
           echo "VISORS_PK_COUNT=$VISORS_PK_COUNT"
 
-      # 8) Run VitalSigns
       - name: Run VitalSigns (produce JSON + Markdown)
         env:
           TODAY: ${{ steps.date.outputs.today }}
@@ -101,7 +92,6 @@ jobs:
           python scripts/skywire_vitals.py
           echo "Wrote: data/${TODAY}/skywire_vitals.json and data/${TODAY}/skywire_summary.md"
 
-      # 9) Upload RAW JSON
       - name: Upload RAW JSON (private artifact)
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,13 +101,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # 10) Sanitize JSON
+      # --- robust sanitize: write Python file then run (no heredoc pitfalls) ---
       - name: Sanitize JSON (remove sensitive data)
         env:
           TODAY: ${{ steps.date.outputs.today }}
         run: |
           set -e
-          python - <<'PY'
+          mkdir -p .tmp
+          cat > .tmp/sanitize.py <<'PY'
 import os, json, sys
 
 TODAY = os.environ.get("TODAY")
@@ -132,7 +123,6 @@ except FileNotFoundError:
     sys.exit(0)
 
 for g in doc.get("groups", []):
-    # Public group: reduce samples count
     if g.get("name") == "public":
         s = g.get("summary", {})
         samples = s.get("samples", {})
@@ -144,19 +134,19 @@ for g in doc.get("groups", []):
             for k in list(it.keys()):
                 if k not in ("__url__", "__ok__", "__status__"):
                     del it[k]
-    # Nodes group: remove PK list
     if g.get("name") == "nodes":
         g["visors_pks"] = []
-        s = g.get("summary", {})
+        s = g.get("summary", {}) or {}
         if "ut_note" in s:
             s["ut_note"] = "(redacted)"
+        g["summary"] = s
 
 with open(q, "w") as f:
     json.dump(doc, f, indent=2, ensure_ascii=False)
 print(f"Sanitized written: {q}")
 PY
+          python .tmp/sanitize.py
 
-      # 11) Upload SANITIZED JSON
       - name: Upload SANITIZED JSON (private artifact)
         if: always()
         uses: actions/upload-artifact@v4
@@ -166,7 +156,6 @@ PY
           if-no-files-found: warn
           retention-days: 14
 
-      # 12) Commit & push (rebase-safe)
       - name: Commit & push summary (rebase-safe)
         if: always()
         env:
