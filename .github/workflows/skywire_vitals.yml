@@ -2,90 +2,76 @@ name: skywire-vitals
 
 on:
   workflow_dispatch:
-  schedule:
-    # runs every day at 03:15 UTC
-    - cron: "15 3 * * *"
-
-permissions:
-  contents: write
-
-env:
-  # Explorer (API blockchain centrale) — 1 URL par ligne
-  SKYWIRE_ENDPOINTS: |
-    https://explorer.skycoin.com/api/blockchain/metadata
-    https://explorer.skycoin.com/api/coinSupply
-
-  # Découverte publique (SD/TPD/DMSG/AR/RF) — 1 URL par ligne
-  SKYWIRE_PUBLIC_ENDPOINTS: |
-    https://sd.skycoin.com/api/services?type=visor
-    https://sd.skycoin.com/api/services?type=proxy
-    https://sd.skycoin.com/api/services?type=vpn
-    https://ar.skywire.skycoin.com/transports
-    https://tpd.skywire.skycoin.com/all-transports
-    https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries
-    https://rf.skywire.skycoin.com/
-
-  # (Optionnel) tes propres nœuds — remplace <your-node-*>
-  SKYWIRE_NODE_ENDPOINTS: |
-    https://<your-node-1>/api/health
-    https://<your-node-2>/api/metrics
-
-  # (Optionnel) endpoints Fiber — 1 URL par ligne
-  FIBER_ENDPOINTS: |
-    https://fiber.skywire.dev/api/status
-    https://fiber.skywire.dev/api/metrics
-
-  # Auto-découverte (étape suivante potentielle)
-  DISCOVER_VISORS_FROM_SD: "1"
-
-  # Paramètres d’échantillonnage UT
-  UT_MAX_VISORS: "50"
-  UT_SAMPLE_MODE: "random"
-
-  PYTHONUNBUFFERED: "1"
 
 jobs:
   vitals:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
-            fetch-depth: 0
-            token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests pyyaml
+
+      # ====== ENV visibles ici – une seule source de vérité ======
+      - name: Define endpoints env
+        id: envblock
+        run: |
+          cat > envfile <<'EOF'
+          SKYWIRE_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply
+          SKYWIRE_PUBLIC_ENDPOINTS=https://sd.skycoin.com/api/services?type=visor,https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://ar.skywire.skycoin.com/transports,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/
+          SKYWIRE_NODE_ENDPOINTS=
+          FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status
+          UT_MAX_VISORS=50
+          UT_SAMPLE_MODE=random
+          EOF
+          echo "ENVFILE<<EOF" >> $GITHUB_OUTPUT
+          cat envfile >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Export env
+        run: |
+          echo "${{ steps.envblock.outputs.ENVFILE }}" > .env.sigma
+          set -a
+          . ./.env.sigma
+          set +a
+          echo "---- DEBUG ENV (runner) ----"
+          echo "SKYWIRE_ENDPOINTS=$SKYWIRE_ENDPOINTS"
+          echo "SKYWIRE_PUBLIC_ENDPOINTS=$SKYWIRE_PUBLIC_ENDPOINTS"
+          echo "SKYWIRE_NODE_ENDPOINTS=$SKYWIRE_NODE_ENDPOINTS"
+          echo "FIBER_ENDPOINTS=$FIBER_ENDPOINTS"
+          echo "--------------------------------"
 
       - name: Run Skywire VitalSigns agent
+        env:
+          SKYWIRE_ENDPOINTS: ${{ env.SKYWIRE_ENDPOINTS }}
+          SKYWIRE_PUBLIC_ENDPOINTS: ${{ env.SKYWIRE_PUBLIC_ENDPOINTS }}
+          SKYWIRE_NODE_ENDPOINTS: ${{ env.SKYWIRE_NODE_ENDPOINTS }}
+          FIBER_ENDPOINTS: ${{ env.FIBER_ENDPOINTS }}
+          UT_MAX_VISORS: ${{ env.UT_MAX_VISORS }}
+          UT_SAMPLE_MODE: ${{ env.UT_SAMPLE_MODE }}
         run: |
           python scripts/skywire_vitals.py
 
       - name: Commit & push (rebase-safe)
-        env:
-          GIT_AUTHOR_NAME: sigma-bot
-          GIT_AUTHOR_EMAIL: bot@deepkang.dev
-          GIT_COMMITTER_NAME: sigma-bot
-          GIT_COMMITTER_EMAIL: bot@deepkang.dev
         run: |
-          set -e
-          git config user.name  "sigma-bot"
-          git config user.email "bot@deepkang.dev"
-          git add data/**/skywire_vitals.json data/**/skywire_summary.md || true
-
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(data): Skywire VitalSigns daily snapshot"
-            # rebase-safe push to avoid 'fetch first' errors
-            git pull --rebase origin "${GITHUB_REF_NAME}"
-            git push origin "${GITHUB_REF_NAME}"
-          else
+          git config user.name "sigma-bot"
+          git config user.email "sigma-bot@users.noreply.github.com"
+          git pull --rebase
+          git add data/
+          if git diff --cached --quiet; then
             echo "No changes to commit."
+            exit 0
           fi
+          git commit -m "chore(data): Skywire VitalSigns daily snapshot"
+          git push
