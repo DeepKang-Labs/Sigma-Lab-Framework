@@ -7,17 +7,16 @@
 
 ## Public Infra (Skywire)
 - Visors: 0
-- Proxies: 1347
-- VPN: 789
-- Transports: 0
+- Proxies: 1342
+- VPN: 784
+- Transports: 43
 - DMSG entries: 0
 - RF status: 404 (ok=0)
 
 ## Nodes (if provided)
-- Nodes seen/ok: 0/0
+- Nodes seen/ok: 0/50
 - Latency avg (ms): None
 - Uptime ratio avg: None
-- UT note: No PK provided.
 
 ## Fiber (if provided)
 - Fiber endpoints seen/ok: 2/0
