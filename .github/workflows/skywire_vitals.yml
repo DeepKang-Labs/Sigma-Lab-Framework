@@ -3,126 +3,150 @@ name: Skywire VitalSigns
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7 5 * * *"  # tous les jours à 05:07 UTC
-
-permissions:
-  contents: write
-
-concurrency:
-  group: skywire-vitals
-  cancel-in-progress: false
+    # Runs daily at 05:55 UTC
+    - cron: "55 5 * * *"
 
 jobs:
   vitals:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
+
+    permissions:
+      contents: write    # to push the summary markdown
+      actions: read
+      checks: read
+
+    env:
+      # Defaults (can be overridden by repo/organization secrets)
+      UT_MAX_VISORS: "200"              # cap for probes
+      UT_SAMPLE_MODE: "random"
+      PYTHONUNBUFFERED: "1"
+
+      # Public endpoints
+      SKYWIRE_ENDPOINTS: >
+        https://explorer.skycoin.com/api/blockchain/metadata,
+        https://explorer.skycoin.com/api/coinSupply
+      SKYWIRE_PUBLIC_ENDPOINTS: >
+        https://sd.skycoin.com/api/services?type=visor,
+        https://sd.skycoin.com/api/services?type=proxy,
+        https://sd.skycoin.com/api/services?type=vpn,
+        https://tpd.skywire.skycoin.com/all-transports,
+        https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,
+        https://rf.skywire.skycoin.com/
+      FIBER_ENDPOINTS: >
+        https://fiber.skywire.dev/api/status,
+        https://fiber.skywire.dev/api/metrics
 
     steps:
-      # 1) Checkout (full history, avec token)
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2) Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3) Install dependencies
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install requests pyyaml
+          set -euo pipefail
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          # Ensure mandatory libs are present
+          python - <<'PY'
+          import subprocess, sys
+          def ensure(pkg):
+              try:
+                  __import__(pkg)
+              except Exception:
+                  subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+          for p in ("requests","PyYAML"):
+              ensure(p)
+          PY
 
-      # 4) Date stamp (UTC)
       - name: Date stamp (UTC)
         id: date
         run: echo "today=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
-      # 5) Define endpoints env (avec valeurs par défaut sûres)
       - name: Define endpoints env
         run: |
-          {
-            echo "SKYWIRE_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply";
-            echo "SKYWIRE_PUBLIC_ENDPOINTS=https://sd.skycoin.com/api/services?type=visor,https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/";
-            echo "FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics";
-            # nombre maxi de visors à échantillonner pour UT (peut être surchargé par un secret)
-            echo "UT_MAX_VISORS=${UT_MAX_VISORS:-200}";
-          } >> "$GITHUB_ENV"
+          echo "TODAY=${{ steps.date.outputs.today }}" >> "$GITHUB_ENV"
+          # Trim spaces and store lists as comma-separated strings
+          for k in SKYWIRE_ENDPOINTS SKYWIRE_PUBLIC_ENDPOINTS FIBER_ENDPOINTS; do
+            v="$(echo "${!k}" | tr -d '\n' | sed 's/[[:space:]]//g')"
+            echo "$k=$v" >> "$GITHUB_ENV"
+          done
 
-      # 6) Auto-découverte des visors/public PKs depuis les services publics
+      # ---------- AUTO-DISCOVERY OF PUBLIC VISOR PKs (lightweight) ----------
       - name: Fetch public visors PKs (auto-discovery)
         id: autodiscover
+        env:
+          PUBLIC_SD: "https://sd.skycoin.com/api/services?type=visor"
         run: |
           set -euo pipefail
           python - <<'PY'
-          import os, json, sys, requests
-          sess = requests.Session()
-          addrs = set()
-
-          # On tente "visor", puis à défaut on récolte les PKs des services proxy/vpn
-          urls = [
-            "https://sd.skycoin.com/api/services?type=visor",
-            "https://sd.skycoin.com/api/services?type=proxy",
-            "https://sd.skycoin.com/api/services?type=vpn",
-          ]
-          for u in urls:
-            try:
-              r = sess.get(u, timeout=15)
-              if r.status_code == 200:
-                data = r.json()
-                for it in data:
-                  addr = (it.get("address") or "").strip()
+          import os, json, requests, sys
+          url = os.environ.get("PUBLIC_SD","")
+          pks=set()
+          try:
+              r = requests.get(url, timeout=20)
+              r.raise_for_status()
+              data = r.json()
+              for it in data if isinstance(data,list) else data.get("data",[]):
+                  # entries often under "address" or "pk"
+                  addr = (it.get("address") or it.get("pk") or "").strip()
                   if addr:
-                    addrs.add(addr)
-            except Exception:
-              pass
-
-          # Compacte en liste comma
-          csv = ",".join(sorted(addrs))
-          # Expose pour les étapes suivantes
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-            print(f"auto_pks={csv}", file=f)
+                      pks.add(addr)
+          except Exception as e:
+              print(f"[warn] auto-discovery failed: {e}", file=sys.stderr)
+          # Output as comma list for next step
+          out = ",".join(sorted(pks))
+          with open(os.environ.get("GITHUB_OUTPUT"),"a") as f:
+              f.write(f"auto_pks={out}\n")
           PY
 
-      # 7) Normaliser et fusionner les listes (secrets + auto) -> env final
-      - name: Normalize env (comma lists -> files)
+      # ---------- MERGE (SECRETS + AUTO) INTO A FILE (Option A) ----------
+      - name: Normalize env (save PKs to file instead of env)
         env:
           SECRET_VISORS_PKS: ${{ secrets.VISORS_PKS }}
         run: |
-          # Fusionne secret et auto, supprime virgules de bord
-          MERGED="$(printf "%s,%s" "${SECRET_VISORS_PKS:-}" "${{ steps.autodiscover.outputs.auto_pks }}" | sed 's/^,*//; s/,*$//; s/,,*/,/g')"
-          echo "VISORS_PKS=${MERGED}" >> "$GITHUB_ENV"
+          set -euo pipefail
+          mkdir -p .tmp
+          AUTO="${{ steps.autodiscover.outputs.auto_pks }}"
+          MERGED="$(printf "%s,%s\n" "${SECRET_VISORS_PKS:-}" "${AUTO:-}" \
+                   | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+                   | grep -E '^[0-9a-fA-F:]{10,}$' || true)"
+          echo "$MERGED" | sort -u > .tmp/visors_pks.txt
+          echo "VISORS_PKS_FILE=.tmp/visors_pks.txt" >> "$GITHUB_ENV"
 
-      # 8) Debug env (facultatif)
       - name: Debug env
         run: |
-          echo "TODAY=${{ steps.date.outputs.today }}"
-          echo "UT_MAX_VISORS=$UT_MAX_VISORS"
-          echo "VISORS_PKS length: $(printf %s "$VISORS_PKS" | wc -c)"
+          echo "TODAY=${TODAY}"
+          echo "UT_MAX_VISORS=${UT_MAX_VISORS}"
+          echo "VISORS_PKS_FILE=${VISORS_PKS_FILE}"
+          test -f "${VISORS_PKS_FILE}" && echo "PKs count: $(wc -l < ${VISORS_PKS_FILE})" || echo "PKs file missing"
 
-      # 9) Produit le JSON brut + Markdown (scripts du repo)
+      # ---------- MAIN SCRIPT ----------
       - name: Run VitalSigns (produce JSON + Markdown)
         env:
           TODAY: ${{ steps.date.outputs.today }}
-          PYTHONUNBUFFERED: "1"
-          # Les scripts lisent ces variables :
           SKYWIRE_ENDPOINTS: ${{ env.SKYWIRE_ENDPOINTS }}
           SKYWIRE_PUBLIC_ENDPOINTS: ${{ env.SKYWIRE_PUBLIC_ENDPOINTS }}
           FIBER_ENDPOINTS: ${{ env.FIBER_ENDPOINTS }}
-          VISORS_PKS: ${{ env.VISORS_PKS }}
+          VISORS_PKS_FILE: ${{ env.VISORS_PKS_FILE }}
           UT_MAX_VISORS: ${{ env.UT_MAX_VISORS }}
+          UT_SAMPLE_MODE: ${{ env.UT_SAMPLE_MODE }}
         run: |
           set -euo pipefail
           mkdir -p "data/${TODAY}"
-          python scripts/skywire_vitals.py
+          # The script must accept optional --visors-file
+          python scripts/skywire_vitals.py \
+            --visors-file "${VISORS_PKS_FILE}" || exit 1
           echo "Wrote: data/${TODAY}/skywire_vitals.json and data/${TODAY}/skywire_summary.md"
 
-      # 10) Artefact privé (JSON brut)
+      # ---------- PRIVATE ARTIFACT (RAW JSON) ----------
       - name: Upload RAW JSON (private artifact)
         if: always()
         uses: actions/upload-artifact@v4
@@ -132,43 +156,41 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # 11) Sanitize JSON (pas de données sensibles) via fichier Python temporaire
+      # ---------- SANITIZE JSON (remove sensitive details before any publish) ----------
       - name: Sanitize JSON (remove sensitive data)
         env:
           TODAY: ${{ steps.date.outputs.today }}
         run: |
-          set -e
-          mkdir -p .tmp
-          cat > .tmp/sanitize.py <<'PY'
+          set -euo pipefail
+          cat > sanitize.py <<'PY'
           import os, json, sys
-          TODAY = os.environ.get("TODAY","")
-          p = f"data/{TODAY}/skywire_vitals.json"
-          q = f"data/{TODAY}/skywire_vitals_sanitized.json"
-
+          today = os.environ.get("TODAY")
+          p = f"data/{today}/skywire_vitals.json"
+          q = f"data/{today}/skywire_vitals_sanitized.json"
           try:
-              with open(p, "r") as f:
+              with open(p,"r") as f:
                   doc = json.load(f)
           except FileNotFoundError:
               print("No raw JSON found; skipping sanitize.")
               sys.exit(0)
 
-          # Nettoyage ciblé
           for g in doc.get("groups", []):
-              # Public: ne garder que des compteurs pour samples
+              # Public: compress 'samples' to counts and remove payload details
               if g.get("name") == "public":
-                  s = g.get("summary", {})
-                  samples = s.get("samples", {})
+                  s = g.get("summary", {}) or {}
+                  samples = s.get("samples", {}) or {}
                   if isinstance(samples, dict):
-                      for k, v in list(samples.items()):
+                      for k,v in list(samples.items()):
                           if isinstance(v, list):
                               samples[k] = len(v)
-                  # Réduire payloads aux métadonnées de statut
-                  for it in g.get("payloads", []):
+                      s["samples"] = samples
+                      g["summary"] = s
+                  payloads = g.get("payloads", []) or []
+                  for it in payloads:
                       for k in list(it.keys()):
                           if k not in ("__url__", "__ok__", "__status__"):
                               del it[k]
-
-              # Nodes: jamais publier la liste de PK
+              # Nodes: never publish actual PK list
               if g.get("name") == "nodes":
                   g["visors_pks"] = []
                   s = g.get("summary", {}) or {}
@@ -176,13 +198,12 @@ jobs:
                       s["ut_note"] = "(redacted)"
                   g["summary"] = s
 
-          with open(q, "w") as f:
+          with open(q,"w") as f:
               json.dump(doc, f, indent=2, ensure_ascii=False)
           print(f"Sanitized written: {q}")
           PY
-          python .tmp/sanitize.py
+          python sanitize.py
 
-      # 12) Artefact privé (JSON sanitized)
       - name: Upload SANITIZED JSON (private artifact)
         if: always()
         uses: actions/upload-artifact@v4
@@ -192,28 +213,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # 13) Commit & push (rebase-safe avec stash)
+      # ---------- COMMIT SUMMARY (MARKDOWN ONLY) ----------
       - name: Commit & push summary (rebase-safe)
-        if: success()
-        env:
-          TODAY: ${{ steps.date.outputs.today }}
-          GIT_AUTHOR_NAME: sigma-bot
-          GIT_AUTHOR_EMAIL: bot@deepkang.local
-          GIT_COMMITTER_NAME: sigma-bot
-          GIT_COMMITTER_EMAIL: bot@deepkang.local
-        run: |
-          set -euo pipefail
-          git config user.name "sigma-bot"
-          git config user.email "bot@deepkang.local"
-          # Sécurise le pull rebase même si des fichiers sont modifiés localement
-          git stash --include-untracked || true
-          git pull --rebase || true
-          git stash pop || true
-          git add "data/${TODAY}/skywire_summary.md"
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            exit 0
-          fi
-          git commit -m "chore(data): Skywire VitalSigns daily snapshot" \
-                      -m "Adds auto-discovered VISORS_PKS, explorer supply stats, public infra counts, sanitized JSON stored as private artifact. Improves stability with rebase-safe stashing."
-          git push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: |
+            chore(data): Skywire VitalSigns daily snapshot
+          file_pattern: |
+            data/${{ steps.date.outputs.today }}/skywire_summary.md
+          branch: ${{ github.ref_name }}
