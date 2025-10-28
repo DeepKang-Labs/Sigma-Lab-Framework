@@ -1,14 +1,10 @@
-name: skywire-vitals
+name: skywire-vitals (double-channel)
 
 on:
   workflow_dispatch:
-    inputs:
-      run_note:
-        description: "Optional run note"
-        required: false
-        default: ""
   schedule:
-    - cron: "20 3 * * *"
+    # 2x par jour (UTC)
+    - cron: "7 3,15 * * *"
 
 permissions:
   contents: write
@@ -17,88 +13,153 @@ concurrency:
   group: skywire-vitals
   cancel-in-progress: false
 
+env:
+  PYTHONUNBUFFERED: "1"
+  REQUEST_TIMEOUT: "10"
+
+  # --------- Paramètres publics (OK en clair) ---------
+  # Explorer (supply / metadata)
+  SKYWIRE_ENDPOINTS: >-
+    https://explorer.skycoin.com/api/blockchain/metadata,
+    https://explorer.skycoin.com/api/coinSupply
+
+  # Infra publique (services -> proxy/vpn/transports/dmsg)
+  SKYWIRE_PUBLIC_ENDPOINTS: >-
+    https://sd.skycoin.com/api/services?type=visor,
+    https://sd.skycoin.com/api/services?type=proxy,
+    https://sd.skycoin.com/api/services?type=vpn,
+    https://tpd.skywire.skycoin.com/all-transports,
+    https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,
+    https://rf.skywire.skycoin.com/
+
+  # Fiber (peut répondre 404, conservé pour visibilité)
+  FIBER_ENDPOINTS: >-
+    https://fiber.skywire.dev/api/status,
+    https://fiber.skywire.dev/api/metrics
+
+  # Découverte UT (publique) — on ne publie pas les PK dans le repo
+  VISORS_PKS_AUTO: "true"
+  UT_MAX_VISORS: "200"
+  UT_SAMPLE_MODE: "random"
+
+  # Emplacements attendus (produits par scripts/skywire_vitals.py)
+  RAW_JSON_PATH: "data/$(date -u +'%Y-%m-%d')/skywire_vitals.json"
+  SUMMARY_MD_PATH: "data/$(date -u +'%Y-%m-%d')/skywire_summary.md"
+
 jobs:
   vitals:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+
+    # Secrets vides par défaut (utiles le jour où tu ajoutes des nœuds/PK privés)
+    env:
+      SKYWIRE_NODE_ENDPOINTS: ${{ secrets.SKYWIRE_NODE_ENDPOINTS }}
+      VISORS_PKS: ${{ secrets.VISORS_PKS }}
 
     steps:
-      - name: Set up job
-        run: echo "Starting Skywire VitalSigns run…"
-
       - name: Checkout (full history, with token)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install requests pyyaml
+          pip install requests orjson
 
-      - name: Define endpoints env
+      - name: Normalize env (compact comma lists)
         shell: bash
         run: |
-          : "${SKYWIRE_ENDPOINTS:=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply}"
-          : "${SKYWIRE_PUBLIC_ENDPOINTS:=https://sd.skycoin.com/api/services?type=visor,https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/}"
-          : "${SKYWIRE_NODE_ENDPOINTS:=}"
-          : "${FIBER_ENDPOINTS:=https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics}"
-          : "${VISORS_PKS:=}"                   # tu peux laisser vide
-          : "${VISORS_PKS_AUTO:=true}"          # auto-scan via sd?type=visor
-          : "${UT_MAX_VISORS:=50}"
-          : "${UT_SAMPLE_MODE:=random}"
+          for k in SKYWIRE_ENDPOINTS SKYWIRE_PUBLIC_ENDPOINTS FIBER_ENDPOINTS; do
+            v="$(echo "${!k}" | tr -s ' \n' ' ' | sed 's/, */,/g' | sed 's/^ *//;s/ *$//')"
+            echo "$k=$v" >> "$GITHUB_ENV"
+          done
+          # sécurise les paramètres numériques/flags
+          echo "UT_MAX_VISORS=${UT_MAX_VISORS:-200}" >> "$GITHUB_ENV"
+          echo "UT_SAMPLE_MODE=${UT_SAMPLE_MODE:-random}" >> "$GITHUB_ENV"
+          echo "VISORS_PKS_AUTO=${VISORS_PKS_AUTO:-true}" >> "$GITHUB_ENV"
 
-          clean_csv () { echo "$1" | tr '\n' ',' | sed 's/[[:space:]]//g' | sed 's/,,*/,/g' | sed 's/,$//'; }
-
-          echo "SKYWIRE_ENDPOINTS=$(clean_csv "$SKYWIRE_ENDPOINTS")" >> "$GITHUB_ENV"
-          echo "SKYWIRE_PUBLIC_ENDPOINTS=$(clean_csv "$SKYWIRE_PUBLIC_ENDPOINTS")" >> "$GITHUB_ENV"
-          echo "SKYWIRE_NODE_ENDPOINTS=$(clean_csv "$SKYWIRE_NODE_ENDPOINTS")" >> "$GITHUB_ENV"
-          echo "FIBER_ENDPOINTS=$(clean_csv "$FIBER_ENDPOINTS")" >> "$GITHUB_ENV"
-          echo "VISORS_PKS=$(clean_csv "$VISORS_PKS")" >> "$GITHUB_ENV"
-          echo "VISORS_PKS_AUTO=$VISORS_PKS_AUTO" >> "$GITHUB_ENV"
-          echo "UT_MAX_VISORS=$UT_MAX_VISORS" >> "$GITHUB_ENV"
-          echo "UT_SAMPLE_MODE=$UT_SAMPLE_MODE" >> "$GITHUB_ENV"
-          echo "PYTHONUNBUFFERED=1" >> "$GITHUB_ENV"
-
-      - name: Export env (debug)
+      - name: Debug env
         run: |
-          echo "SKYWIRE_PUBLIC_ENDPOINTS=$SKYWIRE_PUBLIC_ENDPOINTS"
-          echo "VISORS_PKS_AUTO=$VISORS_PKS_AUTO"
+          echo "SKYWIRE_ENDPOINTS=${SKYWIRE_ENDPOINTS}"
+          echo "SKYWIRE_PUBLIC_ENDPOINTS=${SKYWIRE_PUBLIC_ENDPOINTS}"
+          echo "FIBER_ENDPOINTS=${FIBER_ENDPOINTS}"
+          echo "VISORS_PKS_AUTO=${VISORS_PKS_AUTO}"
+          echo "UT_MAX_VISORS=${UT_MAX_VISORS}"
 
-      - name: Run Skywire VitalSigns agent
-        env:
-          SKYWIRE_ENDPOINTS: ${{ env.SKYWIRE_ENDPOINTS }}
-          SKYWIRE_PUBLIC_ENDPOINTS: ${{ env.SKYWIRE_PUBLIC_ENDPOINTS }}
-          SKYWIRE_NODE_ENDPOINTS: ${{ env.SKYWIRE_NODE_ENDPOINTS }}
-          FIBER_ENDPOINTS: ${{ env.FIBER_ENDPOINTS }}
-          VISORS_PKS: ${{ env.VISORS_PKS }}
-          VISORS_PKS_AUTO: ${{ env.VISORS_PKS_AUTO }}
-          UT_MAX_VISORS: ${{ env.UT_MAX_VISORS }}
-          UT_SAMPLE_MODE: ${{ env.UT_SAMPLE_MODE }}
-          PYTHONUNBUFFERED: "1"
+      - name: Run VitalSigns (produit JSON brut + Markdown)
+        shell: bash
         run: |
+          set -euo pipefail
           test -f scripts/skywire_vitals.py
           python scripts/skywire_vitals.py
+          # Vérification présence fichiers
+          test -f "${RAW_JSON_PATH}"
+          test -f "${SUMMARY_MD_PATH}"
 
-      - name: Commit & push (rebase-safe)
+      # === Artefact privé : JSON brut complet (non publié dans le repo) ===
+      - name: Upload RAW JSON (private artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: skywire_vitals_raw_${{ github.run_id }}
+          path: ${{ env.RAW_JSON_PATH }}
+          retention-days: 7
+
+      # === Artefact privé : JSON nettoyé (agrégats, sans PK/adresses/samples) ===
+      - name: Produce sanitized JSON
+        shell: python
+        run: |
+          import os, orjson, pathlib
+          raw = pathlib.Path(os.environ["RAW_JSON_PATH"])
+          data = orjson.loads(raw.read_bytes())
+
+          def scrub_group(g):
+            g.pop("payloads", None)
+            g.pop("visors_pks", None)
+            s = g.get("summary")
+            if isinstance(s, dict) and "samples" in s:
+              s.pop("samples", None)
+            return g
+
+          data["groups"] = [scrub_group(g) for g in data.get("groups", [])]
+          safe = raw.with_name("skywire_vitals.sanitized.json")
+          safe.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+          print(f"Sanitized JSON at: {safe}")
+
+      - name: Upload SANITIZED JSON (private artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: skywire_vitals_sanitized_${{ github.run_id }}
+          path: data/*/skywire_vitals.sanitized.json
+          retention-days: 7
+
+      # === Canal public : on commit UNIQUEMENT le Markdown agrégé ===
+      - name: Commit & push summary (rebase-safe)
         shell: bash
         run: |
-          git config user.name "sigma-bot"
-          git config user.email "bot@deepkang-labs.dev"
-          git add -A
-          git stash || true
-          git pull --rebase --autostash || true
-          git stash pop || true
-          git add -A
-          git commit -m "chore(data): Skywire VitalSigns daily snapshot" || echo "No changes to commit"
-          git push origin main || echo "Push skipped (no new data)"
+          set -e
+          git config user.name  "sigma-bot"
+          git config user.email "bot@deepkang.labs"
+          git add "${SUMMARY_MD_PATH}" || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(data): Skywire VitalSigns summary (public aggregates)"
+          git pull --rebase || true
+          git push
 
-      - name: Complete job
-        run: echo "Skywire VitalSigns workflow finished."
+      # (Optionnel) Nettoyage local JSON avant fin du job, pour éviter tout commit futur accidentel
+      - name: Clean workspace JSON (safety)
+        run: |
+          rm -f data/*/skywire_vitals.json data/*/skywire_vitals.sanitized.json || true
+
+      - name: Done
+        run: echo "Double-channel publishing completed."
