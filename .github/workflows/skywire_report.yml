@@ -1,7 +1,8 @@
 name: skywire-report
 on:
   schedule:
-    - cron: "10 6 * * *"   # chaque jour 06:10 UTC (après skywire-vitals à 06:05)
+    # Lance le report après l’ingestion (ex: vitals à 06:05)
+    - cron: "10 6 * * *"   # tous les jours 06:10 UTC
   workflow_dispatch:
 
 permissions:
@@ -26,10 +27,23 @@ jobs:
         run: |
           python scripts/skywire_vital_report.py
 
-      - name: Commit report artifacts
+      - name: Publish 'reports/latest' alias
+        shell: bash
+        run: |
+          set -euo pipefail
+          LATEST_DIR="reports/latest"
+          rm -rf "$LATEST_DIR"
+          mkdir -p "$LATEST_DIR"
+          # Trouve le dernier répertoire de date (YYYY-MM-DD)
+          LAST=$(ls -1d reports/20*/ 2>/dev/null | sort | tail -n1 || true)
+          if [ -n "$LAST" ]; then
+            cp -r "$LAST"* "$LATEST_DIR"/
+          fi
+
+      - name: Commit report artifacts (with latest alias)
         run: |
           git config user.name "sigma-bot"
           git config user.email "actions@users.noreply.github.com"
           git add reports/ || true
-          git commit -m "feat(report): Skywire Vital Report daily artifacts" || echo "no changes"
+          git commit -m "feat(report): publish daily artifacts + latest alias" || echo "no changes"
           git push
