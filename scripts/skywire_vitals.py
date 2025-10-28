@@ -1,90 +1,87 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-Skywire VitalSigns agent (v3.3.3)
-- Lit des variables d'environnement multi-lignes (1 URL par ligne)
-- Tolère les lignes mal formées de type 'KEY=https://...'
-- Récupère Explorer, Infra publique (SD/TPD/DMSG/AR/RF), Nodes optionnels, Fiber optionnel
-- Écrit:
-    data/YYYY-MM-DD/skywire_vitals.json
-    data/YYYY-MM-DD/skywire_summary.md
+Skywire VitalSigns Agent v3.3.3
+DeepKang Labs (AI Kang & Yuri Kang)
+-------------------------------------------------
+Collects Skywire public infrastructure and Fiber metrics,
+and outputs daily diagnostic summaries for Sigma-Lab.
+-------------------------------------------------
 """
 
-import os, sys, json, time
+import os
+import sys
+import json
+import datetime
+import requests
 from typing import List, Dict, Any
 
-import requests
+# === CONFIGURATION ENVIRONNEMENTALE ===
 
+def getenv_list(name: str) -> List[str]:
+    val = os.getenv(name, "")
+    if not val:
+        return []
+    return [v.strip() for v in val.split(",") if v.strip()]
 
-# -------------------------- utils --------------------------
+SKYWIRE_ENDPOINTS = getenv_list("SKYWIRE_ENDPOINTS")
+SKYWIRE_PUBLIC_ENDPOINTS = getenv_list("SKYWIRE_PUBLIC_ENDPOINTS")
+SKYWIRE_NODE_ENDPOINTS = getenv_list("SKYWIRE_NODE_ENDPOINTS")
+FIBER_ENDPOINTS = getenv_list("FIBER_ENDPOINTS")
 
-def now_utc_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+UT_MAX_VISORS = int(os.getenv("UT_MAX_VISORS", "50"))
+UT_SAMPLE_MODE = os.getenv("UT_SAMPLE_MODE", "random")
 
-def _split_env_lines(name: str) -> List[str]:
-    """
-    Read a multiline env var and return clean URL list (no KEY= prefixes).
-    """
-    raw = os.getenv(name, "")
-    lines: List[str] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        # tolerate 'KEY=https://...' mistakes
-        if "://" in line and "=" in line and line.index("://") > line.index("="):
-            line = line.split("=", 1)[1].strip()
-        lines.append(line)
-    return lines
+# === HTTP FETCH UTILITAIRE ===
 
-def _is_url(s: str) -> bool:
-    return s.startswith("http://") or s.startswith("https://")
-
-def fetch(url: str, timeout: int = 15) -> Dict[str, Any]:
-    entry: Dict[str, Any] = {"__url__": url, "__ok__": False}
-    if not _is_url(url):
-        entry["__error__"] = "Invalid URL"
-        return entry
+def fetch_json(url: str, timeout: int = 10) -> Dict[str, Any]:
+    """Exécute une requête HTTP GET sécurisée et renvoie le JSON brut."""
     try:
-        r = requests.get(url, timeout=timeout, headers={"Accept": "application/json"})
-        entry["__status__"] = r.status_code
-        entry["__ok__"] = r.ok
-        entry["__headers__"] = dict(r.headers)
-        if r.ok:
-            try:
-                entry["data"] = r.json()
-            except Exception:
-                entry["text"] = r.text
-        else:
-            entry["error_text"] = r.text[:500]
+        r = requests.get(url, timeout=timeout)
+        ok = r.status_code == 200
+        try:
+            data = r.json() if ok else None
+        except Exception:
+            data = None
+        return {
+            "__url__": url,
+            "__status__": r.status_code,
+            "__ok__": ok,
+            "data": data
+        }
     except Exception as e:
-        entry["__error__"] = f"{type(e).__name__}: {e}"
-    return entry
+        return {
+            "__url__": url,
+            "__error__": str(e),
+            "__ok__": False
+        }
 
-
-# -------------------------- parsers --------------------------
+# === PARSEURS DE BLOCS DE DONNÉES ===
 
 def parse_explorer(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
-    out = {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None, "notes": []}
+    """Analyse les données de l'explorer Skycoin."""
+    result = {
+        "height": None,
+        "current_supply": None,
+        "total_supply": None,
+        "coin_hours": None
+    }
+
     for p in payloads:
         if not p.get("__ok__"):
             continue
-        data = p.get("data", {})
-        if "current_supply" in data:
-            out["current_supply"] = data.get("current_supply")
-            out["total_supply"] = data.get("total_supply")
-            out["coin_hours"] = data.get("current_coinhour_supply")
-        # certains endpoints exposent la hauteur sous d'autres clés
-        for k in ("height", "block_height", "seq"):
-            if data.get(k) is not None:
-                out["height"] = data[k]
-                break
-    if not any(v for k, v in out.items() if k != "notes"):
-        out["notes"].append("Explorer fields were empty — schema mismatch or temporary outage.")
-    return out
+        data = p.get("data") or {}
+        if "current_suplly" in data or "current_supply" in data:
+            result["current_supply"] = data.get("current_supply") or data.get("current_suplly")
+            result["total_supply"] = data.get("total_supply")
+            result["coin_hours"] = data.get("current_coinhour_supply")
+        elif "blockchain" in p["__url__"]:
+            result["height"] = data.get("head_seq")
+    return result
+
 
 def parse_public_infra(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Analyse les endpoints publics de Skywire."""
     visors = 0
     proxies = 0
     vpn = 0
@@ -97,12 +94,21 @@ def parse_public_infra(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not p.get("__ok__"):
             continue
         url = p["__url__"]
-        data = p.get("data", {})
+        data = p.get("data") or {}
 
         # Service Discovery
         if url.startswith("https://sd.skycoin.com/api/services"):
-            items = data if isinstance(data, list) else data.get("services") or data.get("data") or []
+            items = []
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                items = data.get("services") or data.get("data") or []
+            else:
+                items = []
+
             for it in items:
+                if not isinstance(it, dict):
+                    continue
                 t = (it.get("type") or "").lower()
                 if t == "visor":
                     visors += 1
@@ -111,14 +117,14 @@ def parse_public_infra(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
                 elif t == "vpn":
                     vpn += 1
 
-        # AR / TPD / DMSG — counts approximatifs
-        elif "ar.skywire" in url or "tpd.skywire" in url or "dmsg" in url:
+        # AR / TPD / DMSG
+        elif any(x in url for x in ["ar.skywire", "tpd.skywire", "dmsg"]):
             if isinstance(data, list):
                 transports += len(data)
             elif isinstance(data, dict):
                 transports += len(data.get("transports", [])) + len(data.get("entries", []))
 
-        # RF status
+        # RF
         elif "rf.skywire" in url:
             rf_total += 1
             if p.get("__status__") == 200 and p.get("__ok__"):
@@ -130,140 +136,112 @@ def parse_public_infra(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
         "vpn": vpn,
         "transports": transports,
         "dmsg_entries": dmsg_entries,
-        "rf_status": f"{p.get('__status__', 'n/a')} (ok={rf_ok})"
+        "rf_status": f"{rf_ok} (ok={rf_total})"
     }
 
+
 def parse_nodes(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Analyse les noeuds individuels, si fournis."""
     seen = 0
     ok = 0
     latencies = []
     for p in payloads:
-        if not p.get("__url__") or "<your-node" in p["__url__"]:
-            continue
         seen += 1
         if p.get("__ok__"):
             ok += 1
-            d = p.get("data", {})
-            for k in ("latency_ms", "latency", "avg_latency_ms"):
-                if d.get(k) is not None:
-                    try:
-                        latencies.append(float(d[k]))
-                    except Exception:
-                        pass
-    avg_latency = None if not latencies else round(sum(latencies) / len(latencies), 2)
+            data = p.get("data") or {}
+            if isinstance(data, dict):
+                latency = data.get("latency", None)
+                if isinstance(latency, (int, float)):
+                    latencies.append(latency)
+    avg_lat = sum(latencies) / len(latencies) if latencies else None
+    uptime = round((ok / seen) * 100, 2) if seen else None
     return {
-        "nodes_seen_ok": f"{ok}/{seen}",
-        "latency_avg_ms": avg_latency,
-        "uptime_ratio_avg": None  # sera rempli si on ajoute la collecte UT par PK
+        "nodes_seen": seen,
+        "nodes_ok": ok,
+        "latency_avg": avg_lat,
+        "uptime_avg": uptime
     }
+
 
 def parse_fiber(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
-    seen = 0
+    """Analyse les endpoints Fiber s'ils sont actifs."""
     ok = 0
-    height = None
-    peers = None
+    total = 0
     for p in payloads:
-        if not p.get("__ok__"):
-            continue
-        seen += 1
-        ok += 1
-        d = p.get("data", {})
-        height = d.get("height") or height
-        peers = d.get("peers") or peers
+        total += 1
+        if p.get("__ok__"):
+            ok += 1
     return {
-        "fiber_endpoints_seen_ok": f"{ok}/{seen}",
-        "fiber_height": height,
-        "peers": peers
+        "fiber_ok": ok,
+        "fiber_total": total
     }
 
-
-# -------------------------- main --------------------------
+# === AGRÉGATION GLOBALE ===
 
 def main() -> int:
-    out_dir = os.path.join("data", time.strftime("%Y-%m-%d", time.gmtime()))
-    os.makedirs(out_dir, exist_ok=True)
-    json_path = os.path.join(out_dir, "skywire_vitals.json")
-    md_path   = os.path.join(out_dir, "skywire_summary.md")
+    date_utc = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    all_payloads = {}
 
-    groups = {
-        "explorer": _split_env_lines("SKYWIRE_ENDPOINTS"),
-        "public":   _split_env_lines("SKYWIRE_PUBLIC_ENDPOINTS"),
-        "nodes":    _split_env_lines("SKYWIRE_NODE_ENDPOINTS"),
-        "fiber":    _split_env_lines("FIBER_ENDPOINTS"),
-    }
+    # 1. Explorer
+    explorer_payloads = [fetch_json(u) for u in SKYWIRE_ENDPOINTS]
+    all_payloads["explorer"] = explorer_payloads
+    explorer = parse_explorer(explorer_payloads)
 
-    all_payloads: Dict[str, List[Dict[str, Any]]] = {}
-    for gname, urls in groups.items():
-        payloads: List[Dict[str, Any]] = []
-        for u in urls:
-            payloads.append(fetch(u))
-        all_payloads[gname] = payloads
+    # 2. Public infra
+    public_payloads = [fetch_json(u) for u in SKYWIRE_PUBLIC_ENDPOINTS]
+    all_payloads["public"] = public_payloads
+    public = parse_public_infra(public_payloads)
 
-    # parse
-    explorer = parse_explorer(all_payloads.get("explorer", []))
-    public   = parse_public_infra(all_payloads.get("public", []))
-    nodes    = parse_nodes(all_payloads.get("nodes", []))
-    fiber    = parse_fiber(all_payloads.get("fiber", []))
+    # 3. Nodes
+    node_payloads = [fetch_json(u) for u in SKYWIRE_NODE_ENDPOINTS]
+    nodes = parse_nodes(node_payloads)
 
-    # dump JSON
-    blob = {
-        "date_utc": now_utc_iso(),
-        "meta": {"repo": "DeepKang-Labs/Sigma-Lab-Framework", "agent": "SkywireVitalSigns v3.3.3"},
-        "groups": [
-            {"name": "explorer", "endpoints": groups["explorer"], "payloads": all_payloads["explorer"]},
-            {"name": "public",   "endpoints": groups["public"],   "payloads": all_payloads["public"]},
-            {"name": "nodes",    "endpoints": groups["nodes"],    "payloads": all_payloads["nodes"]},
-            {"name": "fiber",    "endpoints": groups["fiber"],    "payloads": all_payloads["fiber"]},
-        ],
-        "summary": {
-            "explorer": explorer, "public": public, "nodes": nodes, "fiber": fiber
-        }
-    }
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(blob, f, ensure_ascii=False, indent=2)
+    # 4. Fiber
+    fiber_payloads = [fetch_json(u) for u in FIBER_ENDPOINTS]
+    fiber = parse_fiber(fiber_payloads)
 
-    # write MD
-    def line(s=""): return s + "\n"
-    md: List[str] = []
-    md += [line(f"# Skywire VitalSigns — {time.strftime('%Y-%m-%d UTC', time.gmtime())}"), line()]
+    # === GÉNÉRATION RAPPORT ===
+    summary = f"""
+# Skywire VitalSigns — {date_utc} UTC
 
-    md += [line("## Explorer")]
-    md += [line(f"- Height: {explorer['height'] or 'None'}")]
-    md += [line(f"- Current supply: {explorer['current_supply'] or 'None'}")]
-    md += [line(f"- Total supply: {explorer['total_supply'] or 'None'}")]
-    md += [line(f"- Coin Hours: {explorer['coin_hours'] or 'None'}")]
-    if explorer.get("notes"):
-        md += [line(f"> _Note_: {explorer['notes'][0]}")]
-    md += [line()]
+## Explorer
+- Height: {explorer.get("height")}
+- Current supply: {explorer.get("current_supply")}
+- Total supply: {explorer.get("total_supply")}
+- Coin Hours: {explorer.get("coin_hours")}
+- Note: Explorer fields were empty — schema mismatch or temporary outage.
 
-    md += [line("## Public Infra (Skywire)")]
-    md += [line(f"- Visors: {public['visors']}")]
-    md += [line(f"- Proxies: {public['proxies']}")]
-    md += [line(f"- VPN: {public['vpn']}")]
-    md += [line(f"- Transports: {public['transports']}")]
-    md += [line(f"- DMSG entries: {public['dmsg_entries']}")]
-    md += [line(f"- RF status: {public['rf_status']}")]
-    md += [line()]
+## Public Infra (Skywire)
+- Visors: {public.get("visors")}
+- Proxies: {public.get("proxies")}
+- VPN: {public.get("vpn")}
+- Transports: {public.get("transports")}
+- DMSG entries: {public.get("dmsg_entries")}
+- RF status: {public.get("rf_status")}
 
-    md += [line("## Nodes (if provided)")]
-    md += [line(f"- Nodes seen/ok: {nodes['nodes_seen_ok']}")]
-    md += [line(f"- Latency avg (ms): {nodes['latency_avg_ms'] or 'None'}")]
-    md += [line(f"- Uptime ratio avg: {nodes['uptime_ratio_avg'] or 'None'}")]
-    md += [line()]
+## Nodes (if provided)
+- Nodes seen/ok: {nodes.get("nodes_seen")}/{nodes.get("nodes_ok")}
+- Latency avg (ms): {nodes.get("latency_avg")}
+- Uptime ratio avg: {nodes.get("uptime_avg")}
 
-    md += [line("## Uptime Tracker (UT)")]
-    md += [line(f"- UT average (%): {'None'} (no PK available)")]
-    md += [line()]
+## Fiber (if provided)
+- Fiber endpoints seen/ok: {fiber.get("fiber_ok")}/{fiber.get("fiber_total")}
+"""
 
-    md += [line("## Fiber (if provided)")]
-    md += [line(f"- Fiber endpoints seen/ok: {fiber['fiber_endpoints_seen_ok']}")]
-    md += [line(f"- Fiber height: {fiber['fiber_height'] or 'None'} — peers: {fiber['peers'] or 'None'}")]
-    md += [line()]
+    output_dir = f"data/{date_utc}"
+    os.makedirs(output_dir, exist_ok=True)
+    with open(f"{output_dir}/skywire_summary.md", "w", encoding="utf-8") as f:
+        f.write(summary.strip() + "\n")
 
-    with open(md_path, "w", encoding="utf-8") as f:
-        f.writelines(md)
+    with open(f"{output_dir}/skywire_vitals.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "date_utc": date_utc,
+            "meta": {"repo": "DeepKang-Labs/Sigma-Lab-Framework", "agent": "SkywireVitalSigns v3.3.3"},
+            "groups": all_payloads
+        }, f, indent=2)
 
-    print(f"[ok] wrote {json_path} and {md_path}")
+    print("✅ Skywire VitalSigns snapshot generated.")
     return 0
 
 
