@@ -67,15 +67,20 @@ jobs:
           retention-days: 14
 
       - name: Sanitize JSON (remove sensitive data)
+        env:
+          TODAY: ${{ steps.date.outputs.date }}
         run: |
           set -e
           python - <<'PY'
-import json, os, sys
+import os, json, sys
+
 today = os.getenv("TODAY")
 p = f"data/{today}/skywire_vitals.json"
 q = f"data/{today}/skywire_vitals_sanitized.json"
+
 try:
-    with open(p) as f: doc = json.load(f)
+    with open(p) as f:
+        doc = json.load(f)
 except FileNotFoundError:
     print("⚠️ No raw JSON found.")
     sys.exit(0)
@@ -87,6 +92,7 @@ for g in doc.get("groups", []):
         if "ut_note" in s:
             s["ut_note"] = "(redacted)"
         g["summary"] = s
+
 with open(q, "w") as f:
     json.dump(doc, f, indent=2, ensure_ascii=False)
 print(f"✅ Sanitized written: {q}")
@@ -107,7 +113,7 @@ PY
           set -euxo pipefail
           git config user.name "Sigma-Bot"
           git config user.email "bot@sigmalab.local"
-          git add "data/${TODAY}/skywire_summary.md"
+          git add "data/${TODAY}/skywire_summary.md" || true
           git add "data/${TODAY}/skywire_vitals.json" || true
           git commit -m "chore(data): Skywire VitalSigns daily snapshot" || true
           git pull --rebase
