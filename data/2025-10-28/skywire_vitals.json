@@ -19,6 +19,13 @@
       "uptime_ratio_avg": null,
       "success_ratio": 1.0,
       "proxy_activity": null
+    },
+    {
+      "nodes_active": null,
+      "latency_ms_avg": null,
+      "uptime_ratio_avg": null,
+      "success_ratio": 1.0,
+      "proxy_activity": 199006
     }
   ],
   "aggregate": {
@@ -26,9 +33,7 @@
     "latency_ms_avg": null,
     "uptime_ratio_avg": null,
     "success_ratio_avg": 1.0,
-    "proxy_activity_sum": null
+    "proxy_activity_sum": 199006
   },
-  "errors": {
-    "https://explorer.skycoin.com/api/transactions": "HTTPSConnectionPool(host='explorer.skycoin.com', port=443): Read timed out. (read timeout=20)"
-  }
+  "errors": {}
 }

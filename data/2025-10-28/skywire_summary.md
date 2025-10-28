@@ -5,6 +5,6 @@
 - **Latence moyenne** : – ms
 –
 - **Taux de succès** : 100.0 %
-- **Activité proxy (tx)** : –
+- **Activité proxy (tx)** : 199006
 
 > Rapport généré automatiquement par l’agent **Skywire VitalSigns**.
