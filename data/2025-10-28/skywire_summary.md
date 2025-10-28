@@ -6,10 +6,12 @@
 - Total supply: **None**
 - Coin Hours: **None**
 
+> _Note:_ Explorer fields were empty — schema mismatch or temporary outage.
+
 ## Public Infra (Skywire)
 - Visors: **0**
-- Proxies: **1353**
-- VPN: **795**
+- Proxies: **1355**
+- VPN: **794**
 - Transports: **1**
 - DMSG entries: **3046**
 - RF status: **404** (ok=0)

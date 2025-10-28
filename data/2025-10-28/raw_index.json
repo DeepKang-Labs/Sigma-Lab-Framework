@@ -1,0 +1,156 @@
+[
+  {
+    "group": "skywire_public",
+    "items": [
+      {
+        "url": "https://sd.skycoin.com/api/services?type=visor",
+        "ok": true,
+        "status": 200,
+        "preview": "null"
+      },
+      {
+        "url": "https://sd.skycoin.com/api/services?type=proxy",
+        "ok": true,
+        "status": 200,
+        "preview": "[{\"address\": \"03dac9a858ada2154bca05c1f774375e34c590d81af0ecc399f0a96e32d210d086:3\", \"type\": \"skysocks\", \"geo\": {\"lat\": 43.78, \"lon\": 11.25, \"country\": \"IT\", \"region\": \"52\"}, \"version\": \"v1.3.31\"}, {\"address\": \"03960e7828fa3855899cee335a3f13a4db89ac30fee2b791657b5a51ede1ac7910:3\", \"type\": \"skysocks\""
+      },
+      {
+        "url": "https://sd.skycoin.com/api/services?type=vpn",
+        "ok": true,
+        "status": 200,
+        "preview": "[{\"address\": \"03960e7828fa3855899cee335a3f13a4db89ac30fee2b791657b5a51ede1ac7910:44\", \"type\": \"vpn\", \"geo\": {\"lat\": 23.75, \"lon\": 54.5, \"country\": \"AE\"}, \"version\": \"v1.3.31\"}, {\"address\": \"03466d230f7c7b48a5fc268d28128ad7b3c4cd2990396f42290741a97fa4c5eab8:44\", \"type\": \"vpn\", \"geo\": {\"lat\": 1.35, \"l"
+      },
+      {
+        "url": "https://ar.skywire.skycoin.com/transports",
+        "ok": true,
+        "status": 200,
+        "preview": "{\"sudph\": [\"02af0705a329a64cd7ce1137737b384e4dfda733129d3d354f71355fdb7ad2dabe\", \"03785c1715f1638d1307d01535fc7e02796ba96646453fa4d0d5c2edb54ceed644\", \"0359298e04891c531f2d8b7737eabd3e6c0ae907a3989b1747e8d6c9be23d78c48\", \"02527459bd7c090a048d06c9aa57c851d6bf87bfbf2fa3989384b7af8316078762\", \"026a5ff5"
+      },
+      {
+        "url": "https://tpd.skywire.skycoin.com/all-transports",
+        "ok": true,
+        "status": 200,
+        "preview": "[{\"t_id\":\"310c0822-6166-04ab-99db-cb277ef06dd4\",\"edges\":[\"02fcb3d1fb0af14e3870925367a3d81424b2b975e4ca50ca3f7c9830dae39d9408\",\"02fcb3d1fb0af14e3870925367a3d81424b2b975e4ca50ca3f7c9830dae39d9408\"],\"type\":\"dmsg\",\"label\":\"user\"},{\"t_id\":\"6b579b19-f36a-0e0c-a469-bf1312c8b865\",\"edges\":[\"030e7a7e2dff1a91e"
+      },
+      {
+        "url": "https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries",
+        "ok": true,
+        "status": 200,
+        "preview": "[\"02d3b3610c0285c6cae74af3024d5da3ba8d9ed7c0d379d10201ec2d70901d3fb1\", \"0350a0fd13056c64acdfd4b471f4f4cc1e9cf411a97605d975ca8f3057521f28c0\", \"03723d926fae8d0dbe58945d97e71b3495f492e06441f17d8d807125fb392fae3b\", \"027145c752989e64a198de1a02fc16ab716ca23e8569deab89e00209a1e744a3b5\", \"03e5869cb802f68bd8"
+      },
+      {
+        "url": "https://rf.skywire.skycoin.com/",
+        "ok": false,
+        "status": 404,
+        "preview": "404 page not found\n"
+      }
+    ]
+  },
+  {
+    "group": "explorer",
+    "items": [
+      {
+        "url": "SKYWIRE_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      },
+      {
+        "url": "https://explorer.skycoin.com/api/coinSupply",
+        "ok": true,
+        "status": 200,
+        "preview": "{\"current_supply\": \"23490121.000000\", \"total_supply\": \"25000000.000000\", \"max_supply\": \"100000000.000000\", \"current_coinhour_supply\": \"1109431396737\", \"total_coinhour_supply\": \"1137307116255\", \"unlocked_distribution_addresses\": [\"R6aHqKWSQfvpdo2fGSrq4F1RYXkBWR9HHJ\", \"2EYM4WFHe4Dgz6kjAdUkM6Etep7ruz2i"
+      },
+      {
+        "url": "SKYWIRE_PUBLIC_ENDPOINTS=https://sd.skycoin.com/api/services?type=visor",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      },
+      {
+        "url": "https://sd.skycoin.com/api/services?type=proxy",
+        "ok": true,
+        "status": 200,
+        "preview": "[{\"address\": \"03dac9a858ada2154bca05c1f774375e34c590d81af0ecc399f0a96e32d210d086:3\", \"type\": \"skysocks\", \"geo\": {\"lat\": 43.78, \"lon\": 11.25, \"country\": \"IT\", \"region\": \"52\"}, \"version\": \"v1.3.31\"}, {\"address\": \"03960e7828fa3855899cee335a3f13a4db89ac30fee2b791657b5a51ede1ac7910:3\", \"type\": \"skysocks\""
+      },
+      {
+        "url": "https://sd.skycoin.com/api/services?type=vpn",
+        "ok": true,
+        "status": 200,
+        "preview": "[{\"address\": \"03960e7828fa3855899cee335a3f13a4db89ac30fee2b791657b5a51ede1ac7910:44\", \"type\": \"vpn\", \"geo\": {\"lat\": 23.75, \"lon\": 54.5, \"country\": \"AE\"}, \"version\": \"v1.3.31\"}, {\"address\": \"03466d230f7c7b48a5fc268d28128ad7b3c4cd2990396f42290741a97fa4c5eab8:44\", \"type\": \"vpn\", \"geo\": {\"lat\": 1.35, \"l"
+      },
+      {
+        "url": "https://ar.skywire.skycoin.com/transports",
+        "ok": true,
+        "status": 200,
+        "preview": "{\"sudph\": [\"02af0705a329a64cd7ce1137737b384e4dfda733129d3d354f71355fdb7ad2dabe\", \"03785c1715f1638d1307d01535fc7e02796ba96646453fa4d0d5c2edb54ceed644\", \"0359298e04891c531f2d8b7737eabd3e6c0ae907a3989b1747e8d6c9be23d78c48\", \"02527459bd7c090a048d06c9aa57c851d6bf87bfbf2fa3989384b7af8316078762\", \"026a5ff5"
+      },
+      {
+        "url": "https://tpd.skywire.skycoin.com/all-transports",
+        "ok": true,
+        "status": 200,
+        "preview": "[{\"t_id\":\"161785ec-d8d7-0a40-a5e4-9d98b902e845\",\"edges\":[\"0364865065f23ee793f44cc6d089fa5b1035aa031105aeca6dbb2b35ee9a200ecc\",\"0364865065f23ee793f44cc6d089fa5b1035aa031105aeca6dbb2b35ee9a200ecc\"],\"type\":\"dmsg\",\"label\":\"user\"},{\"t_id\":\"8d79abb4-162c-08d4-a539-c72b5cb13a2b\",\"edges\":[\"03c6dbc11669e7533"
+      },
+      {
+        "url": "https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries",
+        "ok": true,
+        "status": 200,
+        "preview": "[\"02d3b3610c0285c6cae74af3024d5da3ba8d9ed7c0d379d10201ec2d70901d3fb1\", \"0350a0fd13056c64acdfd4b471f4f4cc1e9cf411a97605d975ca8f3057521f28c0\", \"03723d926fae8d0dbe58945d97e71b3495f492e06441f17d8d807125fb392fae3b\", \"027145c752989e64a198de1a02fc16ab716ca23e8569deab89e00209a1e744a3b5\", \"03e5869cb802f68bd8"
+      },
+      {
+        "url": "https://rf.skywire.skycoin.com/",
+        "ok": false,
+        "status": 404,
+        "preview": "404 page not found\n"
+      },
+      {
+        "url": "SKYWIRE_NODE_ENDPOINTS=https://sd.skycoin.com/api/services?type=visor",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      },
+      {
+        "url": "https://tpd.skywire.skycoin.com/all-transports",
+        "ok": true,
+        "status": 200,
+        "preview": "[{\"t_id\":\"c48b9fc2-a789-0e45-b4cf-a83112491dc4\",\"edges\":[\"0208d0b9da545ea2e27a5e2035bc6339f93f8d65dfdf6931a0810475cc09787145\",\"0208d0b9da545ea2e27a5e2035bc6339f93f8d65dfdf6931a0810475cc09787145\"],\"type\":\"dmsg\",\"label\":\"user\"},{\"t_id\":\"6c07a985-1dd8-00ac-8134-f2adc2b508e3\",\"edges\":[\"0201a9add997bf168"
+      },
+      {
+        "url": "FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      },
+      {
+        "url": "https://fiber.skywire.dev/api/metrics",
+        "ok": false,
+        "status": 404,
+        "preview": "404 page not found"
+      },
+      {
+        "url": "VISORS_PKS=",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      },
+      {
+        "url": "UT_MAX_VISORS=50",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      },
+      {
+        "url": "UT_SAMPLE_MODE=random",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      },
+      {
+        "url": "PYTHONUNBUFFERED=1",
+        "ok": false,
+        "status": null,
+        "preview": "null"
+      }
+    ]
+  }
+]
