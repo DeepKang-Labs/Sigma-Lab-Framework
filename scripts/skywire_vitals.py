@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-# scripts/skywire_vitals.py
 # DeepKang Labs — Sigma: Skywire VitalSigns
-# v3.3.1 — Fix type hint, SD auto-PK discovery, UT sampling, explorer/public/nodes/fiber aggregation.
+# v3.3.2 — Robust parsers for Explorer/SD, better PK discovery, light raw dump.
 
 import os, json, sys, datetime, pathlib, time, re, random
 from typing import Any, Dict, List, Optional
 import requests
-import pandas as pd
 
 try:
     import yaml
@@ -18,28 +16,25 @@ TODAY = datetime.datetime.utcnow().strftime("%Y-%m-%d")
 DATA_DIR = ROOT / "data" / TODAY
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# ----------- Public endpoints -----------
+RAW_INDEX = DATA_DIR / "raw_index.json"
+
 DEFAULT_SKY_EXPLORER_ENDPOINTS = [
     "https://explorer.skycoin.com/api/blockchain/metadata",
     "https://explorer.skycoin.com/api/coinSupply",
 ]
 
 DEFAULT_SKYWIRE_PUBLIC_ENDPOINTS = [
-    # Service Discovery
     "https://sd.skycoin.com/api/services?type=visor",
     "https://sd.skycoin.com/api/services?type=proxy",
     "https://sd.skycoin.com/api/services?type=vpn",
-    # Address Resolver / Transport Discovery / DMSG Discovery
     "https://ar.skywire.skycoin.com/transports",
     "https://tpd.skywire.skycoin.com/all-transports",
     "https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries",
-    # Reward Framework health (statut HTTP)
     "https://rf.skywire.skycoin.com/",
 ]
 
 UT_BASE = "https://ut.skywire.skycoin.com/uptimes?v=v2&visors="  # + pk1;pk2;...
 
-# ----------- Helpers -----------
 def read_csv_env(name: str) -> List[str]:
     v = os.getenv(name, "") or ""
     if not v.strip():
@@ -85,20 +80,26 @@ def load_nodes_yaml_endpoints_and_pks():
             pks.append(pk.strip())
     return urls, pks
 
-def safe_get(url: str, timeout: int = 20) -> Dict[str, Any]:
+def safe_get(url: str, timeout: int = 25) -> Dict[str, Any]:
     try:
         r = requests.get(url, timeout=timeout)
-        info = {"__url__": url, "__status__": r.status_code, "__ok__": r.ok, "__headers__": dict(r.headers)}
         ctype = r.headers.get("Content-Type", "")
-        if "application/json" in (ctype or "").lower():
+        is_json = "application/json" in (ctype or "").lower()
+        payload = None
+        if is_json:
             try:
-                info["data"] = r.json()
+                payload = r.json()
             except Exception as e:
-                info["__error__"] = f"JSONDecodeError: {e}"
-                info["data"] = None
+                payload = {"__text__": (r.text or "")[:4000], "__json_error__": str(e)}
         else:
-            info["data"] = {"__text__": (r.text or "")[:4000]}
-        return info
+            payload = {"__text__": (r.text or "")[:4000]}
+        return {
+            "__url__": url,
+            "__status__": r.status_code,
+            "__ok__": r.ok,
+            "__headers__": dict(r.headers),
+            "data": payload,
+        }
     except Exception as e:
         return {"__url__": url, "__error__": f"{type(e).__name__}: {e}", "__ok__": False}
 
@@ -108,48 +109,75 @@ def pick(d: Dict[str, Any], keys: List[str], default=None):
             return d[k]
     return default
 
-# ----------- Parsers -----------
+def list_len(x: Any) -> int:
+    if isinstance(x, list):
+        return len(x)
+    if isinstance(x, dict):
+        return len(x.keys())
+    return 0
+
+# -------- Parsers --------
 def parse_explorer_payloads(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
-    m = {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None}
+    out = {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None}
     for p in payloads:
         data = p.get("data")
         if not isinstance(data, dict):
             continue
-        h = pick(data, ["head", "height", "seq"])
-        if isinstance(h, (int, float)):
-            m["height"] = max(m["height"] or 0, int(h))
-        cs = pick(data, ["currentSupply", "current_supply"])
+        # blockchain/metadata (divers champs possibles)
+        md = data if "head_seq" in data or "blocks" in data or "version" in data else None
+        if md:
+            h = pick(md, ["head_seq", "height", "seq", "last_block"])
+            if isinstance(h, (int, float)):
+                out["height"] = max(out["height"] or 0, int(h))
+        # coinSupply variantes
+        cs = pick(data, ["currentSupply", "current_supply", "supply", "coins"])
         if isinstance(cs, (int, float)):
-            m["current_supply"] = float(cs)
-        ts = pick(data, ["totalSupply", "total_supply"])
+            out["current_supply"] = float(cs)
+        # format { confirmed: { coins, hours }, total_supply? }
+        confirmed = data.get("confirmed") if isinstance(data.get("confirmed"), dict) else None
+        if confirmed:
+            coins = pick(confirmed, ["coins", "supply"])
+            hours = pick(confirmed, ["coin_hours", "hours"])
+            if isinstance(coins, (int, float)):
+                out["current_supply"] = float(coins)
+            if isinstance(hours, (int, float)):
+                out["coin_hours"] = float(hours)
+        ts = pick(data, ["totalSupply", "total_supply", "max_supply"])
         if isinstance(ts, (int, float)):
-            m["total_supply"] = float(ts)
-        ch = pick(data, ["coinHours", "coin_hours"])
-        if isinstance(ch, (int, float)):
-            m["coin_hours"] = float(ch)
-    return m
+            out["total_supply"] = float(ts)
+        if out["coin_hours"] is None:
+            ch = pick(data, ["coinHours", "coin_hours"])
+            if isinstance(ch, (int, float)):
+                out["coin_hours"] = float(ch)
+    return out
+
+def _services_array(obj: Any) -> List[Dict[str, Any]]:
+    if isinstance(obj, list):
+        return obj
+    if isinstance(obj, dict) and isinstance(obj.get("services"), list):
+        return obj["services"]
+    return []
 
 def parse_public_infra_payloads(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
     c = {"visors": 0, "proxies": 0, "vpn": 0, "transports": 0, "dmsg_entries": 0, "rf_ok": 0, "rf_last_status": None}
     for p in payloads:
         url, ok, status, data = p.get("__url__", ""), bool(p.get("__ok__", False)), p.get("__status__"), p.get("data")
         if "sd.skycoin.com" in url and "api/services" in url:
-            if ok and isinstance(data, (list, dict)):
-                n = len(data) if isinstance(data, list) else len(data.keys())
+            if ok:
+                arr = _services_array(data)
+                n = list_len(arr)
                 if "type=visor" in url:
                     c["visors"] = n
-                if "type=proxy" in url:
+                elif "type=proxy" in url:
                     c["proxies"] = n
-                if "type=vpn" in url:
+                elif "type=vpn" in url:
                     c["vpn"] = n
         elif "ar.skywire.skycoin.com" in url or "tpd.skywire.skycoin.com" in url:
-            if ok and isinstance(data, (list, dict)):
-                n = len(data) if isinstance(data, list) else len(data.keys())
-                c["transports"] = max(c["transports"], n)
+            if ok:
+                c["transports"] = max(c["transports"], list_len(data))
         elif "dmsgd.skywire.skycoin.com" in url:
-            if ok and isinstance(data, (list, dict)):
-                n = len(data) if isinstance(data, list) else len(data.keys())
-                c["dmsg_entries"] = n
+            if ok:
+                c["dmsg_entries"] = list_len(data)
         elif "rf.skywire.skycoin.com" in url:
             c["rf_last_status"] = status
             if ok and status == 200:
@@ -157,30 +185,29 @@ def parse_public_infra_payloads(payloads: List[Dict[str, Any]]) -> Dict[str, Any
     return c
 
 def extract_public_pks_from_sd(payloads: List[Dict[str, Any]]) -> List[str]:
-    """Find plausible PK fields in SD output."""
-    pks = []
+    pks: List[str] = []
     for p in payloads:
         url, ok, data = p.get("__url__", ""), bool(p.get("__ok__", False)), p.get("data")
         if not ok or "sd.skycoin.com" not in url or "type=visor" not in url:
             continue
-        items = data if isinstance(data, list) else []
+        items = _services_array(data)
         for it in items:
             if not isinstance(it, dict):
                 continue
-            cand = (
-                it.get("pk")
-                or it.get("public_key")
-                or (it.get("attrs") or {}).get("pk")
-                or (it.get("metadata") or {}).get("public_key")
-            )
-            if isinstance(cand, str) and len(cand) >= 64:
+            # format A: direct fields
+            cand = it.get("pk") or it.get("public_key")
+            # format B: nested in attrs/metadata
+            if not cand and isinstance(it.get("attrs"), dict):
+                cand = it["attrs"].get("pk") or it["attrs"].get("public_key")
+            if not cand and isinstance(it.get("metadata"), dict):
+                cand = it["metadata"].get("public_key")
+            if isinstance(cand, str) and len(cand.strip()) >= 64:
                 pks.append(cand.strip())
-    # deduplicate
+    # unique
     seen, out = set(), []
     for k in pks:
         if k not in seen:
-            out.append(k)
-            seen.add(k)
+            out.append(k); seen.add(k)
     return out
 
 def parse_nodes_payloads(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -245,14 +272,30 @@ def parse_ut_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 count = len(vals)
     return {"ut_avg": avg, "ut_count": count}
 
-# ----------- Collect -----------
 def collect_group(name: str, urls: List[str]) -> Dict[str, Any]:
     payloads = []
+    raw = []
     for u in urls:
         if not u:
             continue
-        payloads.append(safe_get(u))
+        resp = safe_get(u)
+        payloads.append(resp)
+        # raw preview
+        preview = ""
+        data = resp.get("data")
+        if isinstance(data, dict) and "__text__" in data:
+            preview = data["__text__"][:300]
+        else:
+            preview = json.dumps(data, ensure_ascii=False)[:300]
+        raw.append({"url": u, "ok": resp.get("__ok__"), "status": resp.get("__status__"), "preview": preview})
         time.sleep(0.2)
+    # append light raw index
+    try:
+        idx = json.loads(RAW_INDEX.read_text(encoding="utf-8")) if RAW_INDEX.exists() else []
+        idx.append({"group": name, "items": raw})
+        RAW_INDEX.write_text(json.dumps(idx, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
     return {"name": name, "endpoints": urls, "payloads": payloads}
 
 def main() -> int:
@@ -281,11 +324,10 @@ def main() -> int:
     nodes = nodes_env if nodes_env else nodes_urls
     fiber = fiber_env or []
 
-    # Collecte publique (inclut SD:visor)
     g_public = collect_group("skywire_public", public)
     g_explorer = collect_group("explorer", explorer)
 
-    # Auto-découverte de PKs si rien n’est fourni
+    # PKs
     pk_list: List[str] = []
     if visors_pks:
         pk_list += [p for p in visors_pks.split(";") if p.strip()]
@@ -294,17 +336,10 @@ def main() -> int:
     if not pk_list:
         sd_pks = extract_public_pks_from_sd(g_public["payloads"])
         if sd_pks:
-            if ut_mode == "random" and len(sd_pks) > ut_max:
-                pk_list = random.sample(sd_pks, ut_max)
-            else:
-                pk_list = sd_pks[:ut_max]
+            pk_list = random.sample(sd_pks, min(len(sd_pks), ut_max)) if ut_mode == "random" else sd_pks[:ut_max]
 
-    ut_payload = None
-    if pk_list:
-        ut_url = UT_BASE + ";".join(pk_list[:50])  # limite sécurité
-        ut_payload = safe_get(ut_url)
+    ut_payload = safe_get(UT_BASE + ";".join(pk_list[:50])) if pk_list else None
 
-    # Groupes restants
     groups = [g_explorer, g_public]
     if nodes:
         groups.append(collect_group("nodes", nodes))
@@ -313,19 +348,13 @@ def main() -> int:
 
     explorer_m = parse_explorer_payloads(g_explorer["payloads"])
     public_c = parse_public_infra_payloads(g_public["payloads"])
-    nodes_m = (
-        parse_nodes_payloads(groups[2]["payloads"])
-        if len(groups) >= 3 and groups[2]["name"] == "nodes"
-        else {}
-    )
-    fiber_m = (
-        parse_fiber_payloads(groups[-1]["payloads"]) if groups and groups[-1]["name"] == "fiber" else {}
-    )
+    nodes_m = (parse_nodes_payloads(groups[2]["payloads"]) if len(groups) >= 3 and groups[2]["name"] == "nodes" else {})
+    fiber_m = (parse_fiber_payloads(groups[-1]["payloads"]) if groups and groups[-1]["name"] == "fiber" else {})
     ut_m = parse_ut_payload(ut_payload) if ut_payload else {}
 
     out = {
         "date_utc": TODAY,
-        "meta": {"repo": "DeepKang-Labs/Sigma-Lab-Framework", "agent": "SkywireVitalSigns v3.3.1"},
+        "meta": {"repo": "DeepKang-Labs/Sigma-Lab-Framework", "agent": "SkywireVitalSigns v3.3.2"},
         "groups": groups,
         "pk_sampled": pk_list,
         "vitals": {
@@ -353,17 +382,20 @@ def main() -> int:
         },
     }
 
-    (DATA_DIR / "skywire_vitals.json").write_text(
-        json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    (DATA_DIR / "skywire_vitals.json").write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
 
     md = []
     md.append(f"# Skywire VitalSigns — {TODAY} UTC\n")
+    # Explorer
     md.append("## Explorer")
-    md.append(f"- Height: **{out['vitals'].get('height','None')}**")
+    height = out['vitals'].get('height', 'None')
+    md.append(f"- Height: **{height if height is not None else 'None'}**")
     md.append(f"- Current supply: **{out['vitals'].get('current_supply','None')}**")
     md.append(f"- Total supply: **{out['vitals'].get('total_supply','None')}**")
     md.append(f"- Coin Hours: **{out['vitals'].get('coin_hours','None')}**\n")
+    if height is None:
+        md.append("> _Note:_ Explorer fields were empty — schema mismatch or temporary outage.\n")
+    # Public
     md.append("## Public Infra (Skywire)")
     md.append(f"- Visors: **{out['vitals'].get('public_visors','0')}**")
     md.append(f"- Proxies: **{out['vitals'].get('public_proxies','0')}**")
@@ -371,24 +403,27 @@ def main() -> int:
     md.append(f"- Transports: **{out['vitals'].get('public_transports','0')}**")
     md.append(f"- DMSG entries: **{out['vitals'].get('public_dmsg_entries','0')}**")
     md.append(f"- RF status: **{out['vitals'].get('rf_last_status','n/a')}** (ok={out['vitals'].get('rf_ok','0')})\n")
+    # Nodes
     md.append("## Nodes (if provided)")
     md.append(f"- Nodes seen/ok: **{out['vitals'].get('nodes_seen','None')}/{out['vitals'].get('nodes_ok','None')}**")
     md.append(f"- Latency avg (ms): **{out['vitals'].get('latency_ms_avg','None')}**")
     md.append(f"- Uptime ratio avg: **{out['vitals'].get('uptime_ratio_avg','None')}**\n")
+    # UT
     md.append("## Uptime Tracker (UT)")
     if out["vitals"].get("ut_avg") is not None:
         md.append(f"- UT average (%): **{round(out['vitals']['ut_avg'], 2)}** over **{out['vitals'].get('ut_count',0)}** visors")
         md.append(f"- PKs sampled ({len(out['pk_sampled'])}): `{';'.join(out['pk_sampled'])}`\n")
     else:
         md.append("- UT average (%): **None** (no PK available)\n")
+    # Fiber
     md.append("## Fiber (if provided)")
     md.append(f"- Fiber endpoints seen/ok: **{out['vitals'].get('fiber_seen','None')}/{out['vitals'].get('fiber_ok','None')}**")
     md.append(f"- Fiber height: **{out['vitals'].get('fiber_height','None')}** — peers: **{out['vitals'].get('fiber_peers','None')}**\n")
+
     (DATA_DIR / "skywire_summary.md").write_text("\n".join(md), encoding="utf-8")
 
     with open(ROOT / "DATALOG.md", "a", encoding="utf-8") as f:
-        f.write(f"{TODAY} : vitals+summary (Explorer+Public+Nodes+Fiber+UT, auto-PKs={len(out['pk_sampled'])})\n")
-
+        f.write(f"{TODAY} : vitals+summary v3.3.2 (Explorer+Public+Nodes+Fiber+UT, PKs={len(out['pk_sampled'])})\n")
     return 0
 
 if __name__ == "__main__":
