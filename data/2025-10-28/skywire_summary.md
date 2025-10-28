@@ -7,9 +7,9 @@
 
 ## Public Infra (Skywire)
 - Visors: 0
-- Proxies: 1326
-- VPN: 761
-- Transports: 43
+- Proxies: 1324
+- VPN: 760
+- Transports: 44
 - DMSG entries: 0
 - RF status: 404 (ok=0)
 
