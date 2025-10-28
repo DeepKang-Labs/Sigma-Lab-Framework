@@ -2,7 +2,7 @@ name: skywire-vitals
 
 on:
   schedule:
-    - cron: "05 6 * * *"   # tous les jours 06:05 UTC
+    - cron: "05 6 * * *"   # every day at 06:05 UTC
   workflow_dispatch:
 
 permissions:
@@ -34,7 +34,14 @@ jobs:
 
       - name: Run Skywire VitalSigns agent
         env:
+          # Explorer (SKY blockchain)
           SKYWIRE_ENDPOINTS: ${{ vars.SKYWIRE_ENDPOINTS }}
+          # Skywire public infra (SD/AR/TPD/DMSGD/RF)
+          SKYWIRE_PUBLIC_ENDPOINTS: ${{ vars.SKYWIRE_PUBLIC_ENDPOINTS }}
+          # Optional: your node APIs (health/metrics)
+          SKYWIRE_NODE_ENDPOINTS: ${{ vars.SKYWIRE_NODE_ENDPOINTS }}
+          # Optional: Fiber endpoints
+          FIBER_ENDPOINTS: ${{ vars.FIBER_ENDPOINTS }}
         run: |
           python scripts/skywire_vitals.py
 
@@ -47,7 +54,7 @@ jobs:
 
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "chore(data): Skywire VitalSigns daily snapshot"
+            git commit -m "chore(data): Skywire VitalSigns daily snapshot (explorer+public+nodes+fiber)"
           fi
 
           git fetch origin main
