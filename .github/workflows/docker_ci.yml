@@ -16,20 +16,25 @@ jobs:
   build-and-smoke:
     runs-on: ubuntu-latest
 
-    # IMPORTANT: autoriser l’écriture sur GHCR
     permissions:
       contents: read
       packages: write
 
     env:
-      # Mise en minuscules pour GHCR
-      IMAGE_OWNER: ${{ toLower(github.repository_owner) }}
-      IMAGE_NAME: ghcr.io/${{ toLower(github.repository_owner) }}/sigma
+      IMAGE_BASE: ghcr.io
+      REPOSITORY: ${{ github.repository }}
       ARTIFACTS_ROOT: artifacts
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set lowercase repo name
+        id: repo
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "repo_lower=$REPO_LOWER" >> $GITHUB_ENV
+          echo "Using lowercase repo: $REPO_LOWER"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,20 +46,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ env.repo_lower }}:latest
+            ghcr.io/${{ env.repo_lower }}:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ env.repo_lower }}:latest
           cache-to: type=inline
 
       - name: Prepare artifacts folders
         run: |
-          rm -rf "$ARTIFACTS_ROOT"
           mkdir -p "$ARTIFACTS_ROOT/heartbeat" \
                    "$ARTIFACTS_ROOT/mesh/inbox" \
                    "$ARTIFACTS_ROOT/mesh/outbox" \
@@ -67,7 +71,7 @@ jobs:
             -e MODE=node \
             -e ARTIFACTS_ROOT=/data/artifacts \
             -v "${{ github.workspace }}/artifacts:/data/artifacts" \
-            "${{ env.IMAGE_NAME }}:latest"
+            ghcr.io/${{ env.repo_lower }}:latest
 
       - name: Smoke • federate
         run: |
@@ -75,7 +79,7 @@ jobs:
             -e MODE=federate \
             -e ARTIFACTS_ROOT=/data/artifacts \
             -v "${{ github.workspace }}/artifacts:/data/artifacts" \
-            "${{ env.IMAGE_NAME }}:latest"
+            ghcr.io/${{ env.repo_lower }}:latest
 
       - name: Smoke • apply
         run: |
@@ -83,7 +87,7 @@ jobs:
             -e MODE=apply \
             -e ARTIFACTS_ROOT=/data/artifacts \
             -v "${{ github.workspace }}/artifacts:/data/artifacts" \
-            "${{ env.IMAGE_NAME }}:latest"
+            ghcr.io/${{ env.repo_lower }}:latest
 
       - name: Upload artifacts (snapshot)
         uses: actions/upload-artifact@v4
