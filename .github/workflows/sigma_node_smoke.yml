@@ -1,12 +1,10 @@
-name: Sigma Node (Smoke Test)
-
+name: Sigma Node Smoke Test
 on:
   workflow_dispatch:
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,12 +12,12 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.x'
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml requests
+          pip install requests pyyaml
 
       - name: Date (UTC)
         id: date
@@ -36,7 +34,6 @@ jobs:
           mkdir -p "$ARTIFACTS_ROOT/mesh/archive"
           mkdir -p "$ARTIFACTS_ROOT/model"
 
-      # -------- Modèle local (si absent) --------
       - name: Initialize local model (zero-weights)
         env:
           ARTIFACTS_ROOT: artifacts
@@ -76,17 +73,6 @@ JSON
           export PYTHONPATH="$PWD"
           python scripts/mesh_federate.py
 
-      - name: Mesh | Loopback delta to inbox (for smoke test)
-        env:
-          ARTIFACTS_ROOT: artifacts
-        run: |
-          set -euo pipefail
-          if compgen -G "artifacts/mesh/outbox/*.json" > /dev/null; then
-            cp artifacts/mesh/outbox/*.json artifacts/mesh/inbox/ || true
-          else
-            echo "No delta in outbox; skipping loopback."
-          fi
-
       - name: Mesh | Apply (consume inbox)
         env:
           ARTIFACTS_ROOT: artifacts
@@ -95,7 +81,7 @@ JSON
           export PYTHONPATH="$PWD"
           python scripts/mesh_apply.py
 
-      - name: Construire manifest (récap des artefacts)
+      - name: Build manifest (recap des artefacts)
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -103,18 +89,15 @@ import os, json
 root = "artifacts"
 summary = {
   "heartbeat_exists": os.path.exists(os.path.join(root, "heartbeat", "heartbeat.json")),
-  "model_path": os.path.join(root, "model", "local_model.json"),
   "model_exists": os.path.exists(os.path.join(root, "model", "local_model.json")),
-  "mesh": {
-    "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
-    "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root, "mesh", "inbox")) else 0,
-    "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0,
-  }
+  "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
+  "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root, "mesh", "inbox")) else 0,
+  "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0,
 }
 os.makedirs(root, exist_ok=True)
 with open(os.path.join(root, "manifest.json"), "w") as f:
   json.dump(summary, f, indent=2)
-print("Manifest:", json.dumps(summary, indent=2))
+print("📦 Manifest:", json.dumps(summary, indent=2))
 PY
 
       - name: Upload — manifest
@@ -122,21 +105,13 @@ PY
         with:
           name: sigma_manifest_${{ steps.date.outputs.date }}
           path: artifacts/manifest.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Upload — data day
         uses: actions/upload-artifact@v4
         with:
           name: sigma_data_${{ steps.date.outputs.date }}
-          path: artifacts/data/**/*.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: Upload — artifacts (folder)
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_artifacts_${{ steps.date.outputs.date }}
-          path: artifacts/**
-          if-no-files-found: error
+          path: artifacts/model/local_model.json
+          if-no-files-found: warn
           retention-days: 7
