@@ -1,4 +1,4 @@
-name: SIGMA Node — Smoke
+name: SIGMA Node — Smoke + Mesh
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
 
     steps:
       - name: Checkout
@@ -34,50 +34,88 @@ jobs:
           set -euo pipefail
           mkdir -p "data/${{ steps.date.outputs.date }}"
           mkdir -p mesh/outbox mesh/inbox
+          mkdir -p artifacts/model artifacts/mesh/outbox artifacts/mesh/inbox artifacts/mesh/archive
 
+      # —— Init modèle local (artifacts/model/local_model.json ; clés par défaut alignées) ——
+      - name: Initialize local model (zero-weights)
+        env:
+          PYTHONPATH: "${{ github.workspace }}"
+          ARTIFACTS_ROOT: "artifacts"
+          # Optionnel : override des clés si besoin
+          # SIGMA_MODEL_KEYS: "proxies,vpn,transports,dmsg_entries,rf_status_ok"
+        run: |
+          set -euo pipefail
+          python scripts/model/init_model.py
+
+      # —— Exécution du nœud Sigma (écrit heartbeat/model_state/deltas) ——
       - name: Run Sigma Node (HTTP ping mode)
         env:
+          PYTHONPATH: "${{ github.workspace }}"
           SIGMA_NODE_ID: "sigma-ci-${{ github.run_id }}"
-          SKYWIRE_RPC_MODE: "http"
+          SKYWIRE_RPC_MODE: "http"                      # "mock" si endpoints publics instables
           SKYWIRE_HTTP_BASE: "https://sd.skycoin.com"
           SIGMA_DATA_ROOT: "data"
           SIGMA_MESH_OUTBOX: "mesh/outbox"
           SIGMA_MESH_INBOX: "mesh/inbox"
           SIGMA_MESH_AGG_EVERY: "3"
-          PYTHONPATH: "${{ github.workspace }}"
         run: |
           set -euo pipefail
           echo "[Info] PYTHONPATH=$PYTHONPATH"
           python scripts/sigma_node.py
 
+      # —— Mesh | Producer : génère un delta heuristique dans artifacts/mesh/outbox ——
+      - name: Mesh | Federate (produce delta)
+        env:
+          PYTHONPATH: "${{ github.workspace }}"
+          ARTIFACTS_ROOT: "artifacts"
+          SIGMA_NODE_ID: "sigma-ci-${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          python scripts/mesh/federate.py
+
+      # —— Mesh | Apply : copie 1 delta outbox → inbox puis applique (agrégation pondérée) ——
+      - name: Mesh | Apply (consume inbox)
+        env:
+          PYTHONPATH: "${{ github.workspace }}"
+          ARTIFACTS_ROOT: "artifacts"
+        run: |
+          set -euo pipefail
+          # Simule un échange: place un delta d'outbox vers inbox s'il y en a
+          cp artifacts/mesh/outbox/*.json artifacts/mesh/inbox/ 2>/dev/null || true
+          python scripts/mesh/apply.py
+
+      # —— Listing rapide pour debug ——
       - name: Collect artifacts (listing)
         run: |
           set -euo pipefail
+          echo "— data/${{ steps.date.outputs.date }} —"
           ls -al "data/${{ steps.date.outputs.date }}" || true
+          echo "— mesh/ (repo root) —"
           ls -al mesh || true
+          echo "— artifacts tree —"
+          find artifacts -maxdepth 2 -type f -name "*.json" -print || true
 
-      - name: Upload artifacts (heartbeat)
+      # —— Upload : données du jour (heartbeat/model_state/agg) ——
+      - name: Upload artifacts (data day)
         uses: actions/upload-artifact@v4
         with:
-          name: sigma_heartbeat_${{ steps.date.outputs.date }}
-          path: data/${{ steps.date.outputs.date }}/sigma_heartbeat.json
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Upload artifacts (model)
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_model_${{ steps.date.outputs.date }}
-          path: data/${{ steps.date.outputs.date }}/sigma_model.json
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Upload artifacts (mesh outbox & inbox)
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_mesh_${{ steps.date.outputs.date }}
+          name: sigma_data_${{ steps.date.outputs.date }}
           path: |
-            mesh/outbox/**
-            mesh/inbox/**
+            data/${{ steps.date.outputs.date }}/*heartbeat.json
+            data/${{ steps.date.outputs.date }}/*model_state.json
+            data/${{ steps.date.outputs.date }}/*agg_delta.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      # —— Upload : artifacts (modèle local + mesh outbox/inbox/archive) ——
+      - name: Upload artifacts (artifacts folder)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma_artifacts_${{ steps.date.outputs.date }}
+          path: |
+            artifacts/model/local_model.json
+            artifacts/mesh/outbox/**
+            artifacts/mesh/inbox/**
+            artifacts/mesh/archive/**
           if-no-files-found: warn
           retention-days: 7
