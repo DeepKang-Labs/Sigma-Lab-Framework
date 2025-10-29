@@ -1,14 +1,13 @@
-#!/usr/bin/env python3
-# init_model.py — créer le modèle local s'il n'existe pas
+# scripts/init_model.py
+import os
+import json
+from pathlib import Path
 
-import os, json, sys
+ARTIFACTS_ROOT = os.environ.get("ARTIFACTS_ROOT", "artifacts")
+model_path = os.path.join(ARTIFACTS_ROOT, "model", "local_model.json")
+Path(os.path.dirname(model_path)).mkdir(parents=True, exist_ok=True)
 
-ROOT = os.environ.get("ARTIFACTS_ROOT", "artifacts")
-MODEL_PATH = os.path.join(ROOT, "model", "local_model.json")
-
-os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-
-if not os.path.exists(MODEL_PATH):
+if not os.path.exists(model_path):
     data = {
         "version": "0.1.0",
         "updated_at": None,
@@ -18,8 +17,8 @@ if not os.path.exists(MODEL_PATH):
             "transport_density": 0.0
         }
     }
-    with open(MODEL_PATH, "w", encoding="utf-8") as f:
+    with open(model_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    print(f"✅ Created zeroed model: {MODEL_PATH}")
+    print(f"Created zeroed model:", model_path)
 else:
-    print(f"ℹ️ Model already exists: {MODEL_PATH}")
+    print(f"Model already exists:", model_path)
