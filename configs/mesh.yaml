@@ -1,15 +1,15 @@
 # configs/mesh.yaml
-# Select backend: "http" (real peers) or "git" (CI/mailbox)
-backend: "git"         # change to "http" when you deploy servers
-node_id: "node-alpha"  # unique per node
+# Backend: "http" (prod) ou "git" (boîte aux lettres via branche Git)
+backend: "http"          # passe à "git" si tu utilises le mode mailbox
+node_id: "node-alpha"    # unique par nœud
 
 http:
-  shared_token: "CHANGE_ME_SECRET"  # same secret on all peers
+  shared_token: "CHANGE_ME_SECRET"   # même secret sur tous les nœuds
   peers:
     - name: "node-bravo"
-      url: "https://YOUR_NODE_BRAVO_HOST/api"   # e.g., http(s)://host:port/api
+      url: "https://bravo.example.com/api"
     # - name: "node-charlie"
-    #   url: "https://YOUR_NODE_CHARLIE_HOST/api"
+    #   url: "https://charlie.example.com/api"
 
 git:
   repo_url: "https://github.com/DeepKang-Labs/Sigma-Lab-Framework.git"
