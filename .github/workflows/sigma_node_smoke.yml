@@ -1,4 +1,4 @@
-name: Sigma Node — Smoke + Mesh
+name: Sigma Node + Mesh
 
 on:
   workflow_dispatch:
@@ -6,15 +6,12 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout (full history, with token)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -25,33 +22,46 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install requests pyyaml
+          pip install requests
 
       - name: Date (UTC)
         id: date
-        run: echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare folders
+        env:
+          ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          rm -rf artifacts
-          mkdir -p artifacts/heartbeat artifacts/model artifacts/mesh/{outbox,inbox,archive}
-          mkdir -p data/${{ steps.date.outputs.date }}
+          mkdir -p "$ARTIFACTS_ROOT"/heartbeat
+          mkdir -p "$ARTIFACTS_ROOT"/mesh/inbox
+          mkdir -p "$ARTIFACTS_ROOT"/mesh/outbox
+          mkdir -p "$ARTIFACTS_ROOT"/mesh/archive
+          mkdir -p "$ARTIFACTS_ROOT"/model
 
+      # ---------- Modèle local (si absent) ----------
       - name: Initialize local model (zero-weights)
+        env:
+          ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          cat > artifacts/model/local_model.json <<'JSON'
-          {
-            "version": "0.1.0",
-            "updated_at": null,
-            "weights": {
-              "latency_mean_ms": 0.0,
-              "availability_score": 0.0,
-              "transport_density": 0.0
-            }
-          }
-          JSON
+          MODEL="$ARTIFACTS_ROOT/model/local_model.json"
+          if [ ! -f "$MODEL" ]; then
+            cat > "$MODEL" <<'JSON'
+{
+  "version": "0.1.0",
+  "updated_at": null,
+  "weights": {
+    "latency_mean_ms": 0.0,
+    "availability_score": 0.0,
+    "transport_density": 0.0
+  }
+}
+JSON
+            echo "Created zeroed model: $MODEL"
+          else
+            echo "Model already exists: $MODEL"
+          fi
 
       - name: Run Sigma Node (HTTP ping mode)
         env:
@@ -69,6 +79,15 @@ jobs:
           export PYTHONPATH="$PWD"
           python scripts/mesh_federate.py
 
+      # (optionnel) boucle locale pour tester l’ingestion :
+      - name: Mesh | Loopback delta to inbox (for smoke test)
+        env:
+          ARTIFACTS_ROOT: artifacts
+        run: |
+          set -euo pipefail
+          # copie le dernier delta vers inbox afin que mesh_apply ait quelque chose à consommer
+          ls -1 "$ARTIFACTS_ROOT/mesh/outbox"/*.json | tail -n 1 | xargs -I{} cp "{}" "$ARTIFACTS_ROOT/mesh/inbox/" || true
+
       - name: Mesh | Apply (consume inbox)
         env:
           ARTIFACTS_ROOT: artifacts
@@ -82,101 +101,37 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-import os, json
-root = "artifacts"
-summary = {
-  "heartbeat_exists": os.path.exists(os.path.join(root, "heartbeat", "heartbeat.json")),
-  "model_path": os.path.join(root, "model", "local_model.json"),
-  "model_exists": os.path.exists(os.path.join(root, "model", "local_model.json")),
-  "mesh": {
-    "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
-    "inbox":  len(os.listdir(os.path.join(root, "mesh", "inbox")))  if os.path.isdir(os.path.join(root, "mesh", "inbox"))  else 0,
-    "archive":len(os.listdir(os.path.join(root, "mesh", "archive")))if os.path.isdir(os.path.join(root, "mesh", "archive"))else 0,
-  }
-}
-os.makedirs(root, exist_ok=True)
-with open(os.path.join(root,"manifest.json"),"w") as f:
-  json.dump(summary, f, indent=2)
-print("Manifest:", json.dumps(summary, indent=2))
+          import os, json
+          root = "artifacts"
+          summary = {
+              "heartbeat_exists": os.path.exists(os.path.join(root, "heartbeat", "heartbeat.json")),
+              "model_path": os.path.join(root, "model", "local_model.json"),
+              "model_exists": os.path.exists(os.path.join(root, "model", "local_model.json")),
+              "mesh": {
+                  "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
+                  "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root, "mesh", "inbox")) else 0,
+                  "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0,
+              },
+          }
+          os.makedirs(root, exist_ok=True)
+          with open(os.path.join(root, "manifest.json"), "w") as f:
+              json.dump(summary, f, indent=2)
+          print("Manifest:", json.dumps(summary, indent=2))
 PY
 
-      # ---------- (Optionnel) Snapshot du modèle dans data/<date>/ ----------
-      # Dé-commente ces 7 lignes si tu veux versionner le modèle dans Git :
-      # - name: Persister modèle du jour dans data et commit
-      #   run: |
-      #     set -euo pipefail
-      #     TODAY="${{ steps.date.outputs.date }}"
-      #     mkdir -p "data/${TODAY}/model"
-      #     cp -f artifacts/model/local_model.json "data/${TODAY}/model/local_model.json"
-      #     git config user.name  "sigma-bot"
-      #     git config user.email "sigma-bot@deepkang.labs"
-      #     git add "data/${TODAY}/model/local_model.json" || true
-      #     git commit -m "chore(model): update local_model snapshot for ${TODAY}" || echo "No changes to commit."
-      #     git pull --rebase
-      #     git push
-
-      # ---------- Uploads séparés ----------
+      # ---------- Uploads ----------
       - name: Upload — manifest
         uses: actions/upload-artifact@v4
         with:
           name: sigma_manifest_${{ steps.date.outputs.date }}
           path: artifacts/manifest.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
 
-      - name: Upload — heartbeat
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_heartbeat_${{ steps.date.outputs.date }}
-          path: artifacts/heartbeat/heartbeat.json
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload — modèle
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_model_${{ steps.date.outputs.date }}
-          path: artifacts/model/local_model.json
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload — mesh_outbox
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_mesh_outbox_${{ steps.date.outputs.date }}
-          path: artifacts/mesh/outbox/**
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload — mesh_inbox
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_mesh_inbox_${{ steps.date.outputs.date }}
-          path: artifacts/mesh/inbox/**
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload — mesh_archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_mesh_archive_${{ steps.date.outputs.date }}
-          path: artifacts/mesh/archive/**
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # ---------- Uploads groupés (comme avant) ----------
-      - name: Upload — artefacts (bundle)
-        uses: actions/upload-artifact@v4
-        with:
-          name: sigma_artifacts_${{ steps.date.outputs.date }}
-          path: artifacts/**
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload — data du jour (bundle)
+      - name: Upload — data day
         uses: actions/upload-artifact@v4
         with:
           name: sigma_data_${{ steps.date.outputs.date }}
-          path: data/${{ steps.date.outputs.date }}/**
-          if-no-files-found: ignore
-          retention-days: 14
+          path: artifacts/**
+          if-no-files-found: error
+          retention-days: 7
