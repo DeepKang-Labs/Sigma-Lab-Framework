@@ -1,0 +1,16 @@
+# docker-compose.yaml
+version: "3.8"
+services:
+  sigma-mesh:
+    build: .
+    container_name: sigma-mesh
+    restart: unless-stopped
+    environment:
+      ARTIFACTS_ROOT: /data/artifacts
+      SIGMA_TOKEN: ${SIGMA_TOKEN}
+      SIGMA_NODE_ID: ${SIGMA_NODE_ID}
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./artifacts:/data/artifacts
