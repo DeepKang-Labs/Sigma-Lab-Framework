@@ -60,7 +60,7 @@ jobs:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(doc, f, indent=2)
             print(f"Created zeroed model: {path}")
-PY
+          PY
           else
             echo "Model already exists: $MODEL"
           fi
