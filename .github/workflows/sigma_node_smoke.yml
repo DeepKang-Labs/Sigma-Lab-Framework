@@ -1,0 +1,74 @@
+name: Sigma Node • Smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 04 * * *" # daily 04:41 UTC (light run)
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # garde une marge si requirements.txt n’a pas ces libs
+          pip install requests PyYAML
+
+      - name: Date (UTC)
+        id: date
+        run: echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare folders
+        run: |
+          set -euo pipefail
+          mkdir -p data/"${{ steps.date.outputs.date }}"
+          mkdir -p mesh/outbox mesh/inbox
+
+      - name: Run Sigma Node (HTTP ping mode)
+        env:
+          SIGMA_NODE_ID: "sigma-ci-${{ github.run_id }}"
+          SKYWIRE_RPC_MODE: "http"                 # change en "mock" si besoin hors réseau
+          SKYWIRE_HTTP_BASE: "https://sd.skycoin.com"
+          SIGMA_DATA_ROOT: "data"
+          SIGMA_MESH_OUTBOX: "mesh/outbox"
+          SIGMA_MESH_INBOX: "mesh/inbox"
+          SIGMA_MESH_AGG_EVERY: "3"
+        run: |
+          set -euo pipefail
+          python scripts/sigma_node.py
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          echo "Artifacts in data/${{ steps.date.outputs.date }} and mesh/*"
+          ls -la data/${{ steps.date.outputs.date }} || true
+          ls -la mesh/outbox || true
+          ls -la mesh/inbox || true
+
+      - name: Upload artifacts (heartbeat, model, deltas)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma-node-smoke_${{ steps.date.outputs.date }}
+          path: |
+            data/${{ steps.date.outputs.date }}/*heartbeat.json
+            data/${{ steps.date.outputs.date }}/*model_state.json
+            data/${{ steps.date.outputs.date }}/*agg_delta.json
+            mesh/outbox/*.json
+          if-no-files-found: warn
+          retention-days: 7
