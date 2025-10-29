@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests pyyaml
 
       - name: Date (UTC)
         id: date
@@ -39,18 +39,18 @@ jobs:
         env:
           SIGMA_NODE_ID: "sigma-ci-${{ github.run_id }}"
           SKYWIRE_RPC_MODE: "http"
-          SKYWIRE_HTTP_BASE: "https://sd.skycoin.com"   # stub HTTP mode
+          SKYWIRE_HTTP_BASE: "https://sd.skycoin.com"
           SIGMA_DATA_ROOT: "data"
           SIGMA_MESH_OUTBOX: "mesh/outbox"
           SIGMA_MESH_INBOX: "mesh/inbox"
           SIGMA_MESH_AGG_EVERY: "3"
-          PYTHONPATH: "${{ github.workspace }}"          # 👈 pour résoudre `from scripts...`
+          PYTHONPATH: "${{ github.workspace }}"
         run: |
           set -euo pipefail
           echo "[Info] PYTHONPATH=$PYTHONPATH"
           python scripts/sigma_node.py
 
-      - name: Collect artifacts
+      - name: Collect artifacts (listing)
         run: |
           set -euo pipefail
           ls -al "data/${{ steps.date.outputs.date }}" || true
