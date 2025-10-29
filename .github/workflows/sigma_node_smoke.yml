@@ -1,4 +1,4 @@
-name: Sigma Node + Mesh
+name: Sigma Node + Mesh (Smoke Test)
 
 on:
   workflow_dispatch:
@@ -10,36 +10,32 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
       - name: Install deps
         run: |
-          set -euo pipefail
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests pyyaml
 
       - name: Date (UTC)
         id: date
-        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+        run: echo "date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
       - name: Prepare folders
         env:
           ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          mkdir -p "$ARTIFACTS_ROOT"/heartbeat
-          mkdir -p "$ARTIFACTS_ROOT"/mesh/inbox
-          mkdir -p "$ARTIFACTS_ROOT"/mesh/outbox
-          mkdir -p "$ARTIFACTS_ROOT"/mesh/archive
-          mkdir -p "$ARTIFACTS_ROOT"/model
+          mkdir -p "$ARTIFACTS_ROOT/heartbeat"
+          mkdir -p "$ARTIFACTS_ROOT/mesh/inbox"
+          mkdir -p "$ARTIFACTS_ROOT/mesh/outbox"
+          mkdir -p "$ARTIFACTS_ROOT/mesh/archive"
+          mkdir -p "$ARTIFACTS_ROOT/model"
 
-      # ---------- Modèle local (si absent) ----------
       - name: Initialize local model (zero-weights)
         env:
           ARTIFACTS_ROOT: artifacts
@@ -49,7 +45,7 @@ jobs:
           if [ ! -f "$MODEL" ]; then
             export MODEL
             python - <<'PY'
-            import json, os, pathlib, time
+            import json, os, pathlib
             path = os.environ["MODEL"]
             pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
             doc = {
@@ -64,7 +60,7 @@ jobs:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(doc, f, indent=2)
             print(f"Created zeroed model: {path}")
-          PY
+PY
           else
             echo "Model already exists: $MODEL"
           fi
@@ -85,15 +81,6 @@ jobs:
           export PYTHONPATH="$PWD"
           python scripts/mesh_federate.py
 
-      # (optionnel) boucle locale pour tester l’ingestion :
-      - name: Mesh | Loopback delta to inbox (for smoke test)
-        env:
-          ARTIFACTS_ROOT: artifacts
-        run: |
-          set -euo pipefail
-          # copie le dernier delta vers inbox afin que mesh_apply ait quelque chose à consommer
-          ls -1 "$ARTIFACTS_ROOT/mesh/outbox"/*.json | tail -n 1 | xargs -I{} cp "{}" "$ARTIFACTS_ROOT/mesh/inbox/" || true
-
       - name: Mesh | Apply (consume inbox)
         env:
           ARTIFACTS_ROOT: artifacts
@@ -102,7 +89,6 @@ jobs:
           export PYTHONPATH="$PWD"
           python scripts/mesh_apply.py
 
-      # ---------- Manifest (récap) ----------
       - name: Construire manifest (récap des artefacts)
         run: |
           set -euo pipefail
@@ -116,28 +102,23 @@ jobs:
               "mesh": {
                   "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
                   "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root, "mesh", "inbox")) else 0,
-                  "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0,
-              },
+                  "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0
+              }
           }
           os.makedirs(root, exist_ok=True)
           with open(os.path.join(root, "manifest.json"), "w") as f:
               json.dump(summary, f, indent=2)
           print("Manifest:", json.dumps(summary, indent=2))
-          PY
+PY
 
-      # ---------- Uploads ----------
       - name: Upload — manifest
         uses: actions/upload-artifact@v4
         with:
           name: sigma_manifest_${{ steps.date.outputs.date }}
           path: artifacts/manifest.json
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Upload — data day
         uses: actions/upload-artifact@v4
         with:
           name: sigma_data_${{ steps.date.outputs.date }}
-          path: artifacts/**
-          if-no-files-found: error
-          retention-days: 7
+          path: artifacts/model/local_model.json
