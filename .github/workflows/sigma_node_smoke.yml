@@ -1,4 +1,4 @@
-name: Sigma Node + Mesh (Smoke Test)
+name: Sigma Node (Smoke Test)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,6 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,16 +13,16 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install requests pyyaml
+          pip install pyyaml requests
 
       - name: Date (UTC)
         id: date
-        run: echo "date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare folders
         env:
@@ -36,6 +35,7 @@ jobs:
           mkdir -p "$ARTIFACTS_ROOT/mesh/archive"
           mkdir -p "$ARTIFACTS_ROOT/model"
 
+      # -------- Modèle local (si absent) --------
       - name: Initialize local model (zero-weights)
         env:
           ARTIFACTS_ROOT: artifacts
@@ -43,24 +43,18 @@ jobs:
           set -euo pipefail
           MODEL="$ARTIFACTS_ROOT/model/local_model.json"
           if [ ! -f "$MODEL" ]; then
-            export MODEL
-            python - <<'PY'
-            import json, os, pathlib
-            path = os.environ["MODEL"]
-            pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
-            doc = {
-              "version": "0.1.0",
-              "updated_at": None,
-              "weights": {
-                "latency_mean_ms": 0.0,
-                "availability_score": 0.0,
-                "transport_density": 0.0
-              }
-            }
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(doc, f, indent=2)
-            print(f"Created zeroed model: {path}")
-          PY
+            cat > "$MODEL" <<'JSON'
+{
+  "version": "0.1.0",
+  "updated_at": null,
+  "weights": {
+    "latency_mean_ms": 0.0,
+    "availability_score": 0.0,
+    "transport_density": 0.0
+  }
+}
+JSON
+            echo "Created zeroed model: $MODEL"
           else
             echo "Model already exists: $MODEL"
           fi
@@ -81,6 +75,18 @@ jobs:
           export PYTHONPATH="$PWD"
           python scripts/mesh_federate.py
 
+      - name: Mesh | Loopback delta to inbox (for smoke test)
+        env:
+          ARTIFACTS_ROOT: artifacts
+        run: |
+          set -euo pipefail
+          # On simule l’arrivée d’un delta externe en copiant l’outbox vers l’inbox
+          if compgen -G "artifacts/mesh/outbox/*.json" > /dev/null; then
+            cp artifacts/mesh/outbox/*.json artifacts/mesh/inbox/ || true
+          else
+            echo "No delta in outbox; skipping loopback."
+          fi
+
       - name: Mesh | Apply (consume inbox)
         env:
           ARTIFACTS_ROOT: artifacts
@@ -89,36 +95,51 @@ jobs:
           export PYTHONPATH="$PWD"
           python scripts/mesh_apply.py
 
+      # -------- Manifest (récap) ----------
       - name: Construire manifest (récap des artefacts)
         run: |
           set -euo pipefail
           python - <<'PY'
-          import os, json
-          root = "artifacts"
-          summary = {
-              "heartbeat_exists": os.path.exists(os.path.join(root, "heartbeat", "heartbeat.json")),
-              "model_path": os.path.join(root, "model", "local_model.json"),
-              "model_exists": os.path.exists(os.path.join(root, "model", "local_model.json")),
-              "mesh": {
-                  "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
-                  "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root, "mesh", "inbox")) else 0,
-                  "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0
-              }
-          }
-          os.makedirs(root, exist_ok=True)
-          with open(os.path.join(root, "manifest.json"), "w") as f:
-              json.dump(summary, f, indent=2)
-          print("Manifest:", json.dumps(summary, indent=2))
-          PY
+import os, json
+root = "artifacts"
+summary = {
+  "heartbeat_exists": os.path.exists(os.path.join(root, "heartbeat", "heartbeat.json")),
+  "model_path": os.path.join(root, "model", "local_model.json"),
+  "model_exists": os.path.exists(os.path.join(root, "model", "local_model.json")),
+  "mesh": {
+    "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root,"mesh","outbox")) else 0,
+    "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root,"mesh","inbox")) else 0,
+    "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root,"mesh","archive")) else 0,
+  }
+}
+os.makedirs(root, exist_ok=True)
+with open(os.path.join(root, "manifest.json"),"w") as f:
+  json.dump(summary, f, indent=2)
+print("Manifest:", json.dumps(summary, indent=2))
+PY
 
+      # -------- Uploads --------
       - name: Upload — manifest
         uses: actions/upload-artifact@v4
         with:
           name: sigma_manifest_${{ steps.date.outputs.date }}
           path: artifacts/manifest.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload — data day
         uses: actions/upload-artifact@v4
         with:
           name: sigma_data_${{ steps.date.outputs.date }}
-          path: artifacts/model/local_model.json
+          path: artifacts/data/**/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # ✅ Ajout de l’artefact complet (dossier artifacts/)
+      - name: Upload — artifacts (folder)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma_artifacts_${{ steps.date.outputs.date }}
+          path: artifacts/**
+          if-no-files-found: error
+          retention-days: 7
