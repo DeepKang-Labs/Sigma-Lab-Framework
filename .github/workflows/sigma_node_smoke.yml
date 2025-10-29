@@ -55,9 +55,9 @@ jobs:
   }
 }
 JSON
-            echo "Created zeroed model: $MODEL"
+            echo "✅ Created zeroed model: $MODEL"
           else
-            echo "Model already exists: $MODEL"
+            echo "ℹ️ Model already exists: $MODEL"
           fi
 
       - name: Run Sigma Node (HTTP ping mode)
