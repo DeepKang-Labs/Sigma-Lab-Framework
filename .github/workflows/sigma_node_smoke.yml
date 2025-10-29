@@ -123,7 +123,7 @@ jobs:
           with open(os.path.join(root, "manifest.json"), "w") as f:
               json.dump(summary, f, indent=2)
           print("Manifest:", json.dumps(summary, indent=2))
-PY
+          PY
 
       # ---------- Uploads ----------
       - name: Upload — manifest
