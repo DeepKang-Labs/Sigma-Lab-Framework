@@ -34,35 +34,13 @@ jobs:
           mkdir -p "$ARTIFACTS_ROOT/mesh/archive"
           mkdir -p "$ARTIFACTS_ROOT/model"
 
-      # ---------- Modèle local (sans HEREDOC) ----------
       - name: Initialize local model (zero-weights)
         env:
           ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          MODEL="$ARTIFACTS_ROOT/model/local_model.json"
-          if [ ! -f "$MODEL" ]; then
-            export MODEL
-            python - <<'PY'
-import os, json
-path = os.environ["MODEL"]
-os.makedirs(os.path.dirname(path), exist_ok=True)
-data = {
-  "version": "0.1.0",
-  "updated_at": None,
-  "weights": {
-    "latency_mean_ms": 0.0,
-    "availability_score": 0.0,
-    "transport_density": 0.0
-  }
-}
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2)
-print(f"✅ Created zeroed model: {path}")
-PY
-          else
-            echo "ℹ️ Model already exists: $MODEL"
-          fi
+          export PYTHONPATH="$PWD"
+          python scripts/init_model.py
 
       - name: Run Sigma Node (HTTP ping mode)
         env:
