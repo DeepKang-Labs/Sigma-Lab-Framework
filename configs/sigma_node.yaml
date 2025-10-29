@@ -1,0 +1,21 @@
+# Minimal Sigma Node config
+node_id: "sigma-local-001"
+
+# Option 1: endpoint HTTP (si un visor expose un HTTP bridge interne)
+skywire:
+  rpc_mode: "http"          # "http" | "mock"
+  http_base: "https://sd.skycoin.com"   # utilisé pour un ping public minimal
+  timeout_s: 8
+
+# Local data (réutilise la structure /data/YYYY-MM-DD/ déjà créée par le workflow)
+data_root: "data"
+
+# Mesh (stockage local des deltas de modèle)
+mesh:
+  outbox_dir: "mesh/outbox"
+  inbox_dir: "mesh/inbox"
+  aggregate_every: 3         # agrège après N deltas disponibles
+
+# Learning
+learning:
+  window: 200                # taille logique de fenêtrage pour stats
