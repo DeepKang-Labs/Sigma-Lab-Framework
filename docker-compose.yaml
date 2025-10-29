@@ -1,16 +1,39 @@
-# docker-compose.yaml
-version: "3.8"
+version: "3.9"
+
 services:
-  sigma-mesh:
-    build: .
-    container_name: sigma-mesh
-    restart: unless-stopped
+  sigma-node:
+    image: ghcr.io/deepkang-labs/sigma:latest
+    container_name: sigma-node
     environment:
+      MODE: node
       ARTIFACTS_ROOT: /data/artifacts
-      SIGMA_TOKEN: ${SIGMA_TOKEN}
-      SIGMA_NODE_ID: ${SIGMA_NODE_ID}
-      PORT: 8000
-    ports:
-      - "8000:8000"
+      SKYWIRE_ENDPOINT: "${SKYWIRE_ENDPOINT:-http://127.0.0.1:3435}"
     volumes:
       - ./artifacts:/data/artifacts
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  mesh-federate:
+    image: ghcr.io/deepkang-labs/sigma:latest
+    container_name: sigma-mesh-federate
+    environment:
+      MODE: federate
+      ARTIFACTS_ROOT: /data/artifacts
+    depends_on:
+      - sigma-node
+    volumes:
+      - ./artifacts:/data/artifacts
+    restart: unless-stopped
+
+  mesh-apply:
+    image: ghcr.io/deepkang-labs/sigma:latest
+    container_name: sigma-mesh-apply
+    environment:
+      MODE: apply
+      ARTIFACTS_ROOT: /data/artifacts
+    depends_on:
+      - mesh-federate
+    volumes:
+      - ./artifacts:/data/artifacts
+    restart: unless-stopped
