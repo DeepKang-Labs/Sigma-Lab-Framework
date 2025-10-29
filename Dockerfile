@@ -1,16 +1,28 @@
-# Dockerfile
+# ===== Sigma-Lab Dockerfile =====
 FROM python:3.11-slim
 
 WORKDIR /app
-RUN pip install --no-cache-dir fastapi uvicorn
 
-COPY scripts/mesh_server.py ./scripts/mesh_server.py
-RUN mkdir -p /data/artifacts/mesh/inbox /data/artifacts/mesh/outbox
+# Copie du code source
+COPY . .
 
-ENV ARTIFACTS_ROOT=/data/artifacts \
-    SIGMA_TOKEN=CHANGE_ME_SECRET \
-    SIGMA_NODE_ID=node-docker \
-    PORT=8000
+# Installation des dépendances
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-EXPOSE 8000
+# Variables d’environnement
+ENV ARTIFACTS_ROOT=/data/artifacts
+ENV PYTHONUNBUFFERED=1
+
+# Création des dossiers de travail
+RUN mkdir -p $ARTIFACTS_ROOT/heartbeat \
+             $ARTIFACTS_ROOT/mesh/inbox \
+             $ARTIFACTS_ROOT/mesh/outbox \
+             $ARTIFACTS_ROOT/mesh/archive \
+             $ARTIFACTS_ROOT/model
+
+# Port exposé (FastAPI)
+EXPOSE 8080
+
+# Entrypoint : lance le serveur mesh
 CMD ["python", "scripts/mesh_server.py"]
