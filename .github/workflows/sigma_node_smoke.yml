@@ -67,23 +67,12 @@ jobs:
           python scripts/mesh_apply.py
 
       - name: Build manifest (récap des artefacts)
+        env:
+          ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          python - <<'PY'
-import os, json
-root = "artifacts"
-summary = {
-  "heartbeat_exists": os.path.exists(os.path.join(root, "heartbeat", "heartbeat.json")),
-  "model_exists": os.path.exists(os.path.join(root, "model", "local_model.json")),
-  "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
-  "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root, "mesh", "inbox")) else 0,
-  "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0,
-}
-os.makedirs(root, exist_ok=True)
-with open(os.path.join(root, "manifest.json"), "w", encoding="utf-8") as f:
-  json.dump(summary, f, indent=2)
-print("📦 Manifest:", json.dumps(summary, indent=2))
-PY
+          export PYTHONPATH="$PWD"
+          python scripts/build_manifest.py
 
       - name: Upload — manifest
         uses: actions/upload-artifact@v4
