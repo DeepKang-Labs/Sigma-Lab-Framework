@@ -1,10 +1,12 @@
-name: Sigma Node Smoke Test
+name: Sigma Node (Smoke Test)
+
 on:
   workflow_dispatch:
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,8 +41,23 @@ jobs:
           ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          export PYTHONPATH="$PWD"
-          python scripts/init_model.py
+          MODEL="$ARTIFACTS_ROOT/model/local_model.json"
+          if [ ! -f "$MODEL" ]; then
+            cat > "$MODEL" <<'JSON'
+{
+  "version": "0.1.0",
+  "updated_at": null,
+  "weights": {
+    "latency_mean_ms": 0.0,
+    "availability_score": 0.0,
+    "transport_density": 0.0
+  }
+}
+JSON
+            echo "Created zeroed model: $MODEL"
+          else
+            echo "Model already exists: $MODEL"
+          fi
 
       - name: Run Sigma Node (HTTP ping mode)
         env:
