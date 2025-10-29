@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 mesh_server.py — FastAPI endpoints for Sigma Mesh.
-
 Env:
   ARTIFACTS_ROOT (default: artifacts)
   SIGMA_TOKEN    (shared secret)
