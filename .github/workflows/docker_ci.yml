@@ -16,12 +16,15 @@ jobs:
   build-and-smoke:
     runs-on: ubuntu-latest
 
+    # IMPORTANT: autoriser l’écriture sur GHCR
     permissions:
       contents: read
       packages: write
 
     env:
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/sigma
+      # Mise en minuscules pour GHCR
+      IMAGE_OWNER: ${{ toLower(github.repository_owner) }}
+      IMAGE_NAME: ghcr.io/${{ toLower(github.repository_owner) }}/sigma
       ARTIFACTS_ROOT: artifacts
 
     steps:
@@ -51,34 +54,36 @@ jobs:
 
       - name: Prepare artifacts folders
         run: |
-          rm -rf $ARTIFACTS_ROOT
-          mkdir -p $ARTIFACTS_ROOT/heartbeat $ARTIFACTS_ROOT/mesh/inbox \
-                   $ARTIFACTS_ROOT/mesh/outbox $ARTIFACTS_ROOT/mesh/archive \
-                   $ARTIFACTS_ROOT/model
+          rm -rf "$ARTIFACTS_ROOT"
+          mkdir -p "$ARTIFACTS_ROOT/heartbeat" \
+                   "$ARTIFACTS_ROOT/mesh/inbox" \
+                   "$ARTIFACTS_ROOT/mesh/outbox" \
+                   "$ARTIFACTS_ROOT/mesh/archive" \
+                   "$ARTIFACTS_ROOT/model"
 
       - name: Smoke • node
         run: |
           docker run --rm \
             -e MODE=node \
             -e ARTIFACTS_ROOT=/data/artifacts \
-            -v ${{ github.workspace }}/artifacts:/data/artifacts \
-            ${{ env.IMAGE_NAME }}:latest
+            -v "${{ github.workspace }}/artifacts:/data/artifacts" \
+            "${{ env.IMAGE_NAME }}:latest"
 
       - name: Smoke • federate
         run: |
           docker run --rm \
             -e MODE=federate \
             -e ARTIFACTS_ROOT=/data/artifacts \
-            -v ${{ github.workspace }}/artifacts:/data/artifacts \
-            ${{ env.IMAGE_NAME }}:latest
+            -v "${{ github.workspace }}/artifacts:/data/artifacts" \
+            "${{ env.IMAGE_NAME }}:latest"
 
       - name: Smoke • apply
         run: |
           docker run --rm \
             -e MODE=apply \
             -e ARTIFACTS_ROOT=/data/artifacts \
-            -v ${{ github.workspace }}/artifacts:/data/artifacts \
-            ${{ env.IMAGE_NAME }}:latest
+            -v "${{ github.workspace }}/artifacts:/data/artifacts" \
+            "${{ env.IMAGE_NAME }}:latest"
 
       - name: Upload artifacts (snapshot)
         uses: actions/upload-artifact@v4
