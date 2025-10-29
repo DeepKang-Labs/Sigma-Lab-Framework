@@ -6,6 +6,7 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +44,7 @@ jobs:
           set -euo pipefail
           MODEL="$ARTIFACTS_ROOT/model/local_model.json"
           if [ ! -f "$MODEL" ]; then
-            cat > "$MODEL" <<'JSON'
+            cat <<'JSON' > "$MODEL"
 {
   "version": "0.1.0",
   "updated_at": null,
@@ -80,7 +81,6 @@ JSON
           ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          # On simule l’arrivée d’un delta externe en copiant l’outbox vers l’inbox
           if compgen -G "artifacts/mesh/outbox/*.json" > /dev/null; then
             cp artifacts/mesh/outbox/*.json artifacts/mesh/inbox/ || true
           else
@@ -95,7 +95,6 @@ JSON
           export PYTHONPATH="$PWD"
           python scripts/mesh_apply.py
 
-      # -------- Manifest (récap) ----------
       - name: Construire manifest (récap des artefacts)
         run: |
           set -euo pipefail
@@ -107,18 +106,17 @@ summary = {
   "model_path": os.path.join(root, "model", "local_model.json"),
   "model_exists": os.path.exists(os.path.join(root, "model", "local_model.json")),
   "mesh": {
-    "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root,"mesh","outbox")) else 0,
-    "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root,"mesh","inbox")) else 0,
-    "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root,"mesh","archive")) else 0,
+    "outbox": len(os.listdir(os.path.join(root, "mesh", "outbox"))) if os.path.isdir(os.path.join(root, "mesh", "outbox")) else 0,
+    "inbox": len(os.listdir(os.path.join(root, "mesh", "inbox"))) if os.path.isdir(os.path.join(root, "mesh", "inbox")) else 0,
+    "archive": len(os.listdir(os.path.join(root, "mesh", "archive"))) if os.path.isdir(os.path.join(root, "mesh", "archive")) else 0,
   }
 }
 os.makedirs(root, exist_ok=True)
-with open(os.path.join(root, "manifest.json"),"w") as f:
+with open(os.path.join(root, "manifest.json"), "w") as f:
   json.dump(summary, f, indent=2)
 print("Manifest:", json.dumps(summary, indent=2))
 PY
 
-      # -------- Uploads --------
       - name: Upload — manifest
         uses: actions/upload-artifact@v4
         with:
@@ -135,7 +133,6 @@ PY
           if-no-files-found: ignore
           retention-days: 7
 
-      # ✅ Ajout de l’artefact complet (dossier artifacts/)
       - name: Upload — artifacts (folder)
         uses: actions/upload-artifact@v4
         with:
