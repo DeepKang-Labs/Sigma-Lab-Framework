@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# build_manifest.py — construit un récap des artefacts
+# build_manifest.py — résumé des artefacts du run
 
 import os, json
 
@@ -14,7 +14,9 @@ summary = {
 }
 
 os.makedirs(ROOT, exist_ok=True)
-with open(os.path.join(ROOT, "manifest.json"), "w", encoding="utf-8") as f:
+
+manifest_path = os.path.join(ROOT, "manifest.json")
+with open(manifest_path, "w", encoding="utf-8") as f:
     json.dump(summary, f, indent=2)
 
-print("📦 Manifest:", json.dumps(summary, indent=2))
+print("📦 Manifest créé :", json.dumps(summary, indent=2))
