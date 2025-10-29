@@ -1,9 +1,7 @@
-name: Sigma Node • Smoke
+name: SIGMA Node — Smoke
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "41 04 * * *" # daily 04:41 UTC (light run)
 
 jobs:
   smoke:
@@ -25,9 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # garde une marge si requirements.txt n’a pas ces libs
-          pip install requests PyYAML
+          pip install requests
 
       - name: Date (UTC)
         id: date
@@ -36,39 +32,52 @@ jobs:
       - name: Prepare folders
         run: |
           set -euo pipefail
-          mkdir -p data/"${{ steps.date.outputs.date }}"
+          mkdir -p "data/${{ steps.date.outputs.date }}"
           mkdir -p mesh/outbox mesh/inbox
 
       - name: Run Sigma Node (HTTP ping mode)
         env:
           SIGMA_NODE_ID: "sigma-ci-${{ github.run_id }}"
-          SKYWIRE_RPC_MODE: "http"                 # change en "mock" si besoin hors réseau
-          SKYWIRE_HTTP_BASE: "https://sd.skycoin.com"
+          SKYWIRE_RPC_MODE: "http"
+          SKYWIRE_HTTP_BASE: "https://sd.skycoin.com"   # stub HTTP mode
           SIGMA_DATA_ROOT: "data"
           SIGMA_MESH_OUTBOX: "mesh/outbox"
           SIGMA_MESH_INBOX: "mesh/inbox"
           SIGMA_MESH_AGG_EVERY: "3"
+          PYTHONPATH: "${{ github.workspace }}"          # 👈 pour résoudre `from scripts...`
         run: |
           set -euo pipefail
+          echo "[Info] PYTHONPATH=$PYTHONPATH"
           python scripts/sigma_node.py
 
       - name: Collect artifacts
         run: |
           set -euo pipefail
-          echo "Artifacts in data/${{ steps.date.outputs.date }} and mesh/*"
-          ls -la data/${{ steps.date.outputs.date }} || true
-          ls -la mesh/outbox || true
-          ls -la mesh/inbox || true
+          ls -al "data/${{ steps.date.outputs.date }}" || true
+          ls -al mesh || true
 
-      - name: Upload artifacts (heartbeat, model, deltas)
-        if: always()
+      - name: Upload artifacts (heartbeat)
         uses: actions/upload-artifact@v4
         with:
-          name: sigma-node-smoke_${{ steps.date.outputs.date }}
+          name: sigma_heartbeat_${{ steps.date.outputs.date }}
+          path: data/${{ steps.date.outputs.date }}/sigma_heartbeat.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload artifacts (model)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma_model_${{ steps.date.outputs.date }}
+          path: data/${{ steps.date.outputs.date }}/sigma_model.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload artifacts (mesh outbox & inbox)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma_mesh_${{ steps.date.outputs.date }}
           path: |
-            data/${{ steps.date.outputs.date }}/*heartbeat.json
-            data/${{ steps.date.outputs.date }}/*model_state.json
-            data/${{ steps.date.outputs.date }}/*agg_delta.json
-            mesh/outbox/*.json
+            mesh/outbox/**
+            mesh/inbox/**
           if-no-files-found: warn
           retention-days: 7
