@@ -1,0 +1,147 @@
+name: Sigma • Skywire capture → Sigma integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Tous les jours à 00:10 UTC (évite les collisions avec d'autres jobs)
+    - cron: "10 0 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests pyyaml pandas matplotlib
+          fi
+
+      - name: Date stamp (UTC)
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare folders
+        env:
+          ARTIFACTS_ROOT: artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACTS_ROOT/raw" "$ARTIFACTS_ROOT/sanitized"
+          mkdir -p reports/latest "data/${{ steps.date.outputs.date }}" .tmp
+
+      - name: Define endpoints env (auto-discovery safe defaults)
+        run: |
+          set -euo pipefail
+          echo "SKYWIRE_EXPLORER_BASE=https://skycoin.com/api" >> $GITHUB_ENV
+          echo "SKYWIRE_PUBLIC_GROUP=public" >> $GITHUB_ENV
+          echo "SKYWIRE_EXPLORER_GROUP=explorer" >> $GITHUB_ENV
+
+      # ---------- Capture ----------
+      - name: Run VitalSigns (produce JSON)
+        env:
+          ARTIFACTS_ROOT: artifacts
+        run: |
+          set -euo pipefail
+          # Produit un JSON brut dans artifacts/raw ET copie dans data/<date>/
+          python scripts/skywire_vitals.py \
+            --out "artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json"
+          cp "artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json" \
+             "data/${{ steps.date.outputs.date }}/skywire_vitals.json"
+
+      - name: Upload RAW JSON (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: skywire_raw_${{ steps.date.outputs.date }}
+          path: artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+      # ---------- Sanitize + rapport rapide ----------
+      - name: Sanitize JSON (private → public-safe) + generate quick report
+        env:
+          ARTIFACTS_ROOT: artifacts
+        run: |
+          set -euo pipefail
+          python scripts/skywire_vital_report.py \
+            --in  "data/${{ steps.date.outputs.date }}/skywire_vitals.json" \
+            --out "artifacts/sanitized/skywire_vitals_sanitized_${{ steps.date.outputs.date }}.json" \
+            --md  "reports/latest/skywire_vital_report.md" \
+            --csv "reports/latest/skywire_vitals_timeseries.csv" \
+            --png "reports/latest/success_ratio_avg.png"
+
+      - name: Upload SANITIZED JSON (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: skywire_sanitized_${{ steps.date.outputs.date }}
+          path: artifacts/sanitized/skywire_vitals_sanitized_${{ steps.date.outputs.date }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+      # ---------- Préparer import du moteur ----------
+      - name: Make engine importable (package + PYTHONPATH)
+        run: |
+          set -euo pipefail
+          # S’assure que engine/ est un paquet Python
+          if [ -d engine ] && [ ! -f engine/__init__.py ]; then
+            echo "# package marker" > engine/__init__.py
+          fi
+          # Expose la racine du repo aux imports Python
+          echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
+
+      # ---------- Intégration Skywire → Sigma ----------
+      - name: Run Integration (Skywire → Sigma) + reports
+        env:
+          # récupère le PYTHONPATH enrichi
+          PYTHONPATH: ${{ env.PYTHONPATH }}
+        run: |
+          set -euo pipefail
+          # Le script écrit par défaut dans reports/latest/ + reports/<date>/
+          python network_bridge/run_network_integrated.py \
+            --network skywire \
+            --discovery "data/${{ steps.date.outputs.date }}" \
+            --also-md \
+            --claude-report
+
+      - name: Upload Integration Reports (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma_integration_${{ steps.date.outputs.date }}
+          path: |
+            reports/latest/**
+            reports/${{ steps.date.outputs.date }}/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Commit & push reports
+        run: |
+          set -euo pipefail
+          # Snapshot daté
+          mkdir -p "reports/${{ steps.date.outputs.date }}"
+          rsync -a --delete "reports/latest/" "reports/${{ steps.date.outputs.date }}/"
+          git config user.name  "sigma-bot"
+          git config user.email "sigma-bot@deepkang.labs"
+          git add reports/ "data/${{ steps.date.outputs.date }}/skywire_vitals.json" || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(reports): Skywire→Sigma integration snapshot for ${{ steps.date.outputs.date }}"
+            git pull --rebase
+            git push
+          else
+            echo "Nothing to commit."
+          fi
