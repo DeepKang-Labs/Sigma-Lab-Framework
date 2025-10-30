@@ -3,7 +3,7 @@ name: Skywire → Sigma | Vitals, Sanitize, Analyze, Report
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7 0 * * *"   # daily @ 00:07 UTC (staggered)
+    - cron: "7 0 * * *"   # daily @ 00:07 UTC
 
 jobs:
   vitals-and-analysis:
@@ -28,13 +28,12 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          # If you have requirements.txt it will be used, otherwise minimal deps
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
             pip install requests pyyaml
           fi
-          # Optional (won't fail if absent): make local engine importable
+          # Optional: make local package importable
           if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then
             pip install -e .
           fi
@@ -48,20 +47,13 @@ jobs:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          mkdir -p data/"$DATE"
-          mkdir -p reports/"$DATE"
-          mkdir -p reports/latest
-          mkdir -p artifacts/raw artifacts/public
-          mkdir -p .tmp
+          mkdir -p data/"$DATE" reports/"$DATE" reports/latest
+          mkdir -p artifacts/raw artifacts/public .tmp
 
       # --- VitalSigns capture ------------------------------------------------
       - name: Define endpoints env (auto-discovery safe defaults)
-        env:
-          DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          # If your script supports it, you can prebuild a visors list here.
-          # Leave file present but empty by default (script may ignore/auto-discover).
           : > .tmp/visors_pks.txt
 
       - name: Run VitalSigns (produce JSON)
@@ -104,26 +96,27 @@ jobs:
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
 
           if [ -f scripts/skywire_vital_report.py ]; then
-            # Preferred path: your dedicated reporter
+            # Preferred reporter if present
             python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD"
           else
-            # Minimal fallback implemented inline (keeps YAML valid)
-            python - <<'PY'
-import os, json, datetime
-date = os.environ['DATE']
+            # Robust fallback via temp script (avoids YAML heredoc parsing issues)
+            cat > .tmp/fallback_sanitize.py <<'PY'
+import os, json, datetime, pathlib, sys
+date = os.environ.get('DATE', 'unknown')
 inp = f"data/{date}/skywire_vitals.json"
 out_json = f"reports/{date}/skywire_vitals_sanitized.json"
 out_md = f"reports/{date}/skywire_vital_report.md"
 
+pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
+
 with open(inp, "r", encoding="utf-8") as f:
     data = json.load(f)
 
-# Light sanitize (remove potentially sensitive keys if present)
-for k in ("ip", "public_key", "debug"):
-    if isinstance(data, dict) and k in data:
-        data.pop(k)
+# Light sanitize: drop sensitive-ish keys if present at top-level
+if isinstance(data, dict):
+    for k in ("ip", "public_key", "debug"):
+        data.pop(k, None)
 
-os.makedirs(os.path.dirname(out_json), exist_ok=True)
 with open(out_json, "w", encoding="utf-8") as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -136,16 +129,15 @@ md = [
   "This is an auto-generated minimal report."
 ]
 with open(out_md, "w", encoding="utf-8") as f:
-    f.write("\n".join(md))
+  f.write("\n".join(md))
 PY
+            python .tmp/fallback_sanitize.py
           fi
 
-          # Update "latest" pointers
+          # Update "latest" pointers and artifacts
           cp "reports/${DATE}/skywire_vitals_sanitized.json" "reports/latest/skywire_vitals_sanitized.json"
           cp "reports/${DATE}/skywire_vital_report.md" "reports/latest/skywire_vital_report.md"
           cp "data/${DATE}/skywire_vitals.json" "reports/latest/skywire_vitals_raw.json" || true
-
-          # Also mirror public files to artifacts/public
           cp "reports/${DATE}/skywire_vitals_sanitized.json" artifacts/public/
           cp "reports/${DATE}/skywire_vital_report.md" artifacts/public/
 
@@ -159,7 +151,7 @@ PY
           if-no-files-found: error
           retention-days: 14
 
-      # --- Sigma analysis (the final loop) ----------------------------------
+      # --- Sigma analysis (close the loop) ----------------------------------
       - name: Make engine importable (package + PYTHONPATH)
         run: |
           set -euo pipefail
@@ -186,7 +178,6 @@ PY
             echo "❌ network_bridge/run_network_integrated.py not found"; exit 1
           fi
 
-          # Keep handy copies
           cp "$OUT_JSON" artifacts/public/ || true
           cp "$OUT_MD" artifacts/public/ || true
           cp "$OUT_JSON" "reports/latest/skywire_sigma_analysis.json" || true
@@ -203,7 +194,7 @@ PY
           if-no-files-found: error
           retention-days: 14
 
-      # --- Optional commit of reports to repo -------------------------------
+      # --- Optional commit of reports ---------------------------------------
       - name: Commit & push reports
         if: ${{ github.event_name != 'pull_request' }}
         env:
