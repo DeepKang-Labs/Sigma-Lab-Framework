@@ -2,6 +2,20 @@ name: Sigma • Skywire capture → Sigma integration
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/skywire_sigma_integration.yml"
+      - "scripts/**"
+      - "data/**"
+      - "reports/**"
+
+# autoriser le workflow à committer/pousser
+permissions:
+  contents: write
+
+concurrency:
+  group: sigma-integration-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   integrate:
@@ -38,7 +52,7 @@ jobs:
           set -euo pipefail
           printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # Try to reuse existing capture, else produce a minimal one
+      # 1) Reutilise la capture si déjà présente, sinon fallback mini-capture
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -59,12 +73,9 @@ import os, json, datetime, pathlib
 d=os.environ.get('DATE','unknown')
 out_json=f"data/{d}/skywire_vitals.json"
 out_md  =f"data/{d}/skywire_summary.md"
-payload = {
-  "date_utc": d,
-  "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},
-  "groups": [{"name":"explorer","endpoints":[],"payloads":[]}],
-  "summary": {"height":None,"current_supply":None,"total_supply":None,"coin_hours":None}
-}
+payload={"date_utc":d,"meta":{"source":"fallback","repo":"Sigma-Lab-Framework"},
+         "groups":[{"name":"explorer","endpoints":[],"payloads":[]}],
+         "summary":{"height":None,"current_supply":None,"total_supply":None,"coin_hours":None}}
 pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
 with open(out_json,"w",encoding="utf-8") as f: json.dump(payload,f,ensure_ascii=False,indent=2)
 with open(out_md,"w",encoding="utf-8") as f:
@@ -73,6 +84,7 @@ with open(out_md,"w",encoding="utf-8") as f:
 PY
           fi
 
+      # 2) Sanitize + MD + Transform → Sigma (bridge.py)
       - name: Sanitize JSON (private → public-safe) + generate quick report + Sigma
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -82,8 +94,6 @@ PY
           OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
           OUT_SIG="reports/${DATE}/skywire_sigma_analysis.json"
-
-          # bridge.py doit produire les 3 outputs (sanitized, report, sigma)
           python scripts/bridge.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD" --sigma "$OUT_SIG"
 
       - name: Upload SANITIZED JSON (artifact)
@@ -111,4 +121,4 @@ PY
           git config user.email "bot@deepkang.local"
           git add reports/ data/
           git commit -m "report(sigma): Skywire capture → Sigma — ${{ steps.date.outputs.date }}" || echo "no changes"
-          git push origin main || true
+          git push origin "${GITHUB_REF_NAME:-main}" || true
