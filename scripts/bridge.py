@@ -1,303 +1,254 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-bridge.py — Skywire → Sigma bridge (squelette propre)
+Bridge Skywire → Sigma
+- Lit un skywire_vitals.json brut
+- Sanitize (retrait champs sensibles éventuels)
+- Produit un mini rapport Markdown
+- Transforme vers un payload Sigma enrichi (metrics réseau + supply)
+- Écrit les sorties dans les chemins fournis
 
-Rôle:
-- Charger le JSON "vitals" (produit par le workflow)
-- Valider/sanétiser minimalement
-- Transformer en payload Sigma canonique
-- (Optionnel) Publier vers un endpoint Sigma (HTTP POST)
-- Écrire un JSON d'analyse + un rapport Markdown
-
-Exécution typique:
-python scripts/bridge.py \
-  --in data/2025-10-30/skywire_vitals.json \
-  --out reports/2025-10-30/skywire_sigma_analysis.json \
-  --report reports/2025-10-30/integration_summary_2025-10-30.md \
-  --endpoint "$SIGMA_ENDPOINT" --token "$SIGMA_TOKEN"
+Usage (exemple) :
+  python scripts/bridge.py \
+      --in data/2025-10-30/skywire_vitals.json \
+      --out reports/2025-10-30/skywire_vitals_sanitized.json \
+      --md  reports/2025-10-30/skywire_vital_report.md \
+      --sigma reports/2025-10-30/skywire_sigma_analysis.json
 """
 
 from __future__ import annotations
 import argparse
-import dataclasses
-import datetime as dt
-import hashlib
 import json
 import os
-import sys
-import textwrap
-import time
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    import requests  # Optionnel: seulement si --endpoint est fourni
-except Exception:     # pragma: no cover
-    requests = None   # On gère l’absence proprement
 
-# --------------------------- Configuration ---------------------------
+# ----------------------------
+# Helpers
+# ----------------------------
 
-DEFAULT_TIMEOUT = 15          # seconds (HTTP)
-MAX_RETRIES = 3               # POST retries
-RETRY_BACKOFF_SEC = 2.0       # exp backoff base
+SUSPECT_KEYS = {"ip", "public_key", "debug"}  # clés potentiellement sensibles au top-level
 
-# Clés potentiellement sensibles dans l’input à retirer du payload public
-STRIP_KEYS = {"ip", "public_key", "debug"}
 
-# --------------------------- Modèle de sortie ------------------------
+def to_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        if isinstance(x, (int, float)):
+            return float(x)
+        s = str(x).strip()
+        if s == "":
+            return default
+        return float(s)
+    except Exception:
+        return default
 
-@dataclasses.dataclass
-class SigmaPayload:
-    date_utc: str
-    source: str = "skywire"
-    repo: str = "Sigma-Lab-Framework"
-    groups: List[str] = dataclasses.field(default_factory=lambda: ["explorer", "public"])
-    metrics: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    notes: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "date_utc": self.date_utc,
-            "meta": {"source": self.source, "repo": self.repo},
-            "groups": self.groups,
-            "metrics": self.metrics,
-            "notes": self.notes,
-        }
+def ensure_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-# --------------------------- Utilitaires -----------------------------
 
-def sha256_of_bytes(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()
-
-def read_json(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
+def load_json(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
-def write_json(path: str, data: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def write_text(path: str, content: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+def write_json(path: Path, obj: Any) -> None:
+    ensure_parent(path)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
 
-def now_utc_iso() -> str:
-    return dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
-# --------------------------- Validation légère -----------------------
+def write_text(path: Path, text: str) -> None:
+    ensure_parent(path)
+    with path.open("w", encoding="utf-8") as f:
+        f.write(text)
 
-def minimal_validate_skywire(data: Dict[str, Any]) -> None:
-    """
-    Valide que le JSON est "raisonnable". On reste volontairement minimal.
-    Lève ValueError si quelque chose cloche.
-    """
-    if not isinstance(data, dict):
-        raise ValueError("Skywire vitals must be a JSON object")
 
-    # Au moins un champ ou sous-structure attendue
-    if not data:
-        raise ValueError("Skywire vitals is empty")
+# ----------------------------
+# Sanitize & Quick report
+# ----------------------------
 
-def sanitize_private_fields(d: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Copie superficielle + retrait de clés sensibles (top-level).
-    Étends si besoin pour un stripping plus profond.
-    """
-    out = dict(d)
+def sanitize_top_level(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Retire quelques clés sensibles (si présentes) au niveau racine uniquement."""
+    out = dict(data)
     for k in list(out.keys()):
-        if k in STRIP_KEYS:
+        if k in SUSPECT_KEYS:
             out.pop(k, None)
     return out
 
-# --------------------------- Transformation --------------------------
 
-def transform_to_sigma(data: Dict[str, Any]) -> SigmaPayload:
-    """
-    Mappe le JSON Skywire vers une structure Sigma unifiée.
-    Adapte ici les métriques que tu veux exposer (placeholders inclus).
-    """
-    # Exemple: on compile quelques métriques génériques si présentes
-    metrics: Dict[str, Any] = {}
+@dataclass
+class QuickCounts:
+    groups: int
+    endpoints_total: int
+    payloads_total: int
+    ok: int
+    failed: int
 
-    # Compte brut de champs (indicateur très large)
-    metrics["fields_count"] = len(data)
 
-    # Si l’input contient une collection (ex: payloads, peers, visors…), on peut compter
-    for key in ("payloads", "peers", "visors"):
-        if key in data and isinstance(data[key], list):
-            metrics[f"{key}_count"] = len(data[key])
+def quick_counts_from_data(data: Dict[str, Any]) -> QuickCounts:
+    groups = data.get("groups", []) or []
+    endpoints_total = 0
+    payloads_total = 0
+    ok = 0
+    failed = 0
 
-    # Placeholder de latence moyenne si fournie quelque part
-    # (À spécialiser selon ton JSON réel)
-    latency = None
-    if isinstance(data.get("latency_ms"), (int, float)):
-        latency = float(data["latency_ms"])
-    elif "metrics" in data and isinstance(data["metrics"], dict):
-        maybe = data["metrics"].get("latency_ms")
-        if isinstance(maybe, (int, float)):
-            latency = float(maybe)
-    if latency is not None:
-        metrics["latency_ms_avg"] = latency
-
-    payload = SigmaPayload(
-        date_utc=now_utc_iso(),
-        metrics=metrics,
-        notes="Auto-generated by bridge.py (squelette). TODO: enrich transformations."
-    )
-    return payload
-
-# --------------------------- Publication HTTP (optionnel) -----------
-
-def post_with_retry(url: str, json_body: Dict[str, Any], token: Optional[str]) -> Dict[str, Any]:
-    if requests is None:
-        raise RuntimeError("Le module 'requests' n'est pas disponible dans cet environnement.")
-
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    last_err: Optional[Exception] = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = requests.post(url, json=json_body, headers=headers, timeout=DEFAULT_TIMEOUT)
-            if 200 <= resp.status_code < 300:
-                try:
-                    return resp.json()
-                except Exception:
-                    return {"status": "ok", "code": resp.status_code, "text": resp.text[:2000]}
+    for g in groups:
+        endpoints = g.get("endpoints", []) or []
+        payloads = g.get("payloads", []) or []
+        endpoints_total += len(endpoints)
+        payloads_total += len(payloads)
+        for p in payloads:
+            if bool(p.get("_ok_")) and p.get("_status_") == 200:
+                ok += 1
             else:
-                last_err = RuntimeError(f"HTTP {resp.status_code}: {resp.text[:2000]}")
-        except Exception as e:
-            last_err = e
+                failed += 1
 
-        # Backoff simple
-        time.sleep(RETRY_BACKOFF_SEC * (2 ** (attempt - 1)))
+    return QuickCounts(
+        groups=len(groups),
+        endpoints_total=endpoints_total,
+        payloads_total=payloads_total,
+        ok=ok,
+        failed=failed,
+    )
 
-    assert last_err is not None
-    raise last_err
 
-# --------------------------- Rapport Markdown -----------------------
+def infer_date_utc(data: Dict[str, Any]) -> str:
+    return data.get("date_utc") or datetime.utcnow().isoformat() + "Z"
 
-def render_report_md(
-    date_str: str,
-    input_path: str,
-    input_sha256: str,
-    analysis_json_path: str,
-    payload: SigmaPayload,
-    publish_result: Optional[Dict[str, Any]],
-) -> str:
+
+def render_markdown_report(date_utc: str, counts: QuickCounts, notes: Optional[str] = None) -> str:
+    availability = 0.0
+    if counts.payloads_total:
+        availability = round(100.0 * counts.ok / counts.payloads_total, 2)
+
     lines = [
-        f"# Sigma Integration Report — {date_str}",
+        f"# Skywire Vital Report ({date_utc})",
         "",
-        f"- **Generated:** {now_utc_iso()}",
-        f"- **Input:** `{input_path}`",
-        f"- **Input SHA-256:** `{input_sha256}`",
-        f"- **Analysis JSON:** `{analysis_json_path}`",
-        "",
-        "## Metrics",
-        "```json",
-        json.dumps(payload.metrics, ensure_ascii=False, indent=2),
-        "```",
+        f"- **Groups**: {counts.groups}",
+        f"- **Endpoints (total)**: {counts.endpoints_total}",
+        f"- **Payloads**: {counts.payloads_total} — ✅ {counts.ok} / ❌ {counts.failed}",
+        f"- **Availability**: {availability} %",
     ]
-    if publish_result is not None:
-        lines += [
-            "",
-            "## Publish result",
-            "```json",
-            json.dumps(publish_result, ensure_ascii=False, indent=2),
-            "```",
-        ]
-    lines += [
-        "",
-        "> Generated by `scripts/bridge.py`. (squelette) — Ajuste la transformation selon tes besoins.",
-        "",
-    ]
+    if notes:
+        lines += ["", f"> {notes}"]
+    lines += ["", "_Auto-generated by bridge.py_"]
     return "\n".join(lines)
 
-# --------------------------- CLI ------------------------------------
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="Bridge Skywire → Sigma (squelette propre).",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent(
-            """\
-            Exemples:
-              python scripts/bridge.py --in data/{DATE}/skywire_vitals.json \\
-                  --out reports/{DATE}/skywire_sigma_analysis.json \\
-                  --report reports/{DATE}/integration_summary_{DATE}.md
+# ----------------------------
+# Transform → Sigma
+# ----------------------------
 
-              python scripts/bridge.py --in data/{DATE}/skywire_vitals.json \\
-                  --out reports/{DATE}/skywire_sigma_analysis.json \\
-                  --report reports/{DATE}/integration_summary_{DATE}.md \\
-                  --endpoint "$SIGMA_ENDPOINT" --token "$SIGMA_TOKEN"
-            """
-        ),
-    )
-    p.add_argument("--in", dest="inp", required=True, help="Chemin du JSON skywire_vitals.json")
-    p.add_argument("--out", dest="out", required=True, help="Chemin du JSON d’analyse Sigma")
-    p.add_argument("--report", dest="report", required=True, help="Chemin du rapport Markdown")
-    p.add_argument("--endpoint", dest="endpoint", default=os.environ.get("SIGMA_ENDPOINT"),
-                   help="Endpoint Sigma (optionnel). Peut venir de $SIGMA_ENDPOINT.")
-    p.add_argument("--token", dest="token", default=os.environ.get("SIGMA_TOKEN"),
-                   help="Token Bearer (optionnel). Peut venir de $SIGMA_TOKEN.")
-    return p.parse_args(argv)
+def transform_to_sigma(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convertit les données brutes skywire_vitals → format Sigma enrichi.
+    Extrait :
+      - current_supply / total_supply / coin_hours_total (si présents dans summary d’un groupe)
+      - métriques réseau (endpoints, payloads ok/failed, disponibilité)
+    """
+    sigma_payload: Dict[str, Any] = {}
+    metrics: Dict[str, Any] = {}
 
-# --------------------------- Main -----------------------------------
-
-def main(argv: Optional[List[str]] = None) -> int:
-    args = parse_args(argv)
-
-    # 1) Lecture + empreinte
-    raw_bytes: bytes
-    with open(args.inp, "rb") as f:
-        raw_bytes = f.read()
-    input_sha = sha256_of_bytes(raw_bytes)
-    data = json.loads(raw_bytes.decode("utf-8"))
-
-    # 2) Validation / Sanitization
-    minimal_validate_skywire(data)
-    sanitized = sanitize_private_fields(data)
-
-    # 3) Transformation
-    payload = transform_to_sigma(sanitized)
-
-    # 4) Écriture du JSON d’analyse
-    analysis_dict = {
-        "generated_utc": now_utc_iso(),
-        "input": {"path": args.inp, "sha256": input_sha},
-        "payload": payload.to_dict(),
-        "version": "bridge.skeleton/v1",
+    # 1) Informations de base
+    meta = data.get("meta", {}) or {}
+    sigma_payload["date_utc"] = infer_date_utc(data)
+    sigma_payload["meta"] = {
+        "source": meta.get("repo", "unknown"),
+        "agent": meta.get("agent", "unknown"),
     }
-    write_json(args.out, analysis_dict)
 
-    # 5) Publication optionnelle
-    publish_result: Optional[Dict[str, Any]] = None
-    if args.endpoint:
-        try:
-            publish_result = post_with_retry(args.endpoint, payload.to_dict(), args.token)
-        except Exception as e:
-            # On n’échoue pas le build si la publication échoue; on l’indique dans le rapport
-            publish_result = {"status": "error", "error": str(e)}
+    # 2) Agrégats réseau + extraction summary (s’il existe)
+    groups = data.get("groups", []) or []
+    total_endpoints = 0
+    total_payloads = 0
+    ok_payloads = 0
+    failed_payloads = 0
 
-    # 6) Rapport Markdown
-    report_md = render_report_md(
-        date_str=os.environ.get("DATE", payload.date_utc[:10]),
-        input_path=args.inp,
-        input_sha256=input_sha,
-        analysis_json_path=args.out,
-        payload=payload,
-        publish_result=publish_result,
+    for g in groups:
+        endpoints = g.get("endpoints", []) or []
+        payloads = g.get("payloads", []) or []
+        total_endpoints += len(endpoints)
+        total_payloads += len(payloads)
+        for p in payloads:
+            if bool(p.get("_ok_")) and p.get("_status_") == 200:
+                ok_payloads += 1
+            else:
+                failed_payloads += 1
+        # Summary blockchain (ex: groupe "explorer")
+        if isinstance(g.get("summary"), dict):
+            summary = g["summary"]
+            metrics["current_supply"] = to_float(summary.get("current_supply"))
+            metrics["total_supply"] = to_float(summary.get("total_supply"))
+            metrics["coin_hours_total"] = to_float(summary.get("coin_hours"))
+
+    metrics["groups_detected"] = len(groups)
+    metrics["endpoints_total"] = total_endpoints
+    metrics["payloads_total"] = total_payloads
+    metrics["payloads_ok"] = ok_payloads
+    metrics["payloads_failed"] = failed_payloads
+    metrics["availability_ratio_%"] = (
+        round(100.0 * ok_payloads / total_payloads, 2) if total_payloads else 0.0
     )
-    write_text(args.report, report_md)
 
-    print(f"[bridge] OK — analysis: {args.out} — report: {args.report}")
-    if publish_result is not None:
-        print(f"[bridge] publish_result: {json.dumps(publish_result)[:400]}")
-    return 0
+    sigma_payload["metrics"] = metrics
+    sigma_payload["notes"] = "Bridge Skywire → Sigma : endpoints & supply aggregated."
+
+    return sigma_payload
+
+
+# ----------------------------
+# Main pipeline
+# ----------------------------
+
+def run_bridge(in_path: Path, out_sanitized: Path, out_md: Path, out_sigma: Path) -> None:
+    # 1) Charge
+    raw = load_json(in_path)
+
+    # 2) Sanitize (léger)
+    sanitized = sanitize_top_level(raw)
+
+    # 3) Quick report
+    counts = quick_counts_from_data(sanitized)
+    date_utc = infer_date_utc(sanitized)
+    md = render_markdown_report(date_utc, counts)
+
+    # 4) Transform → Sigma
+    sigma = transform_to_sigma(sanitized)
+
+    # 5) Écrit les sorties
+    write_json(out_sanitized, sanitized)
+    write_text(out_md, md)
+    write_json(out_sigma, sigma)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Bridge Skywire → Sigma")
+    parser.add_argument("--in", dest="in_path", required=True, help="Chemin du skywire_vitals.json brut")
+    parser.add_argument("--out", dest="out_json", required=True, help="Chemin du JSON sanitizé")
+    parser.add_argument("--md", dest="out_md", required=True, help="Chemin du rapport Markdown")
+    parser.add_argument("--sigma", dest="out_sigma", required=True, help="Chemin du JSON Sigma")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    in_path = Path(args.in_path)
+    out_sanitized = Path(args.out_json)
+    out_md = Path(args.out_md)
+    out_sigma = Path(args.out_sigma)
+
+    if not in_path.exists():
+        raise FileNotFoundError(f"Input not found: {in_path}")
+
+    run_bridge(in_path, out_sanitized, out_md, out_sigma)
+    # Log minimal en sortie CI
+    print(f"[bridge] OK →\n  sanitized: {out_sanitized}\n  report:    {out_md}\n  sigma:     {out_sigma}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
