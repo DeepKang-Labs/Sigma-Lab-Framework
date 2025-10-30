@@ -30,7 +30,7 @@ jobs:
         id: date
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
-      # 3) Prépare dossiers
+      # 3) Dossiers
       - name: Prepare folders
         run: |
           set -euo pipefail
@@ -43,22 +43,23 @@ jobs:
           set -euo pipefail
           printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # 5) Reuse capture si déjà présente ; sinon scripts ; sinon mini-fallback
+      # 5) Capture: reuse si présent, sinon script, sinon mini-fallback
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
+        shell: bash
         run: |
           set -euo pipefail
           OUT_JSON="data/${DATE}/skywire_vitals.json"
           OUT_MD="data/${DATE}/skywire_summary.md"
 
           if [ -s "$OUT_JSON" ]; then
-            echo "♻️  Reusing existing capture: $OUT_JSON"
+            echo "Reusing existing capture: $OUT_JSON"
           elif [ -f scripts/skywire_vitals.py ]; then
-            echo "✅ Using scripts/skywire_vitals.py"
+            echo "Using scripts/skywire_vitals.py"
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "⚠️  Fallback minimal capture (inline Python → file)"
+            echo "Fallback minimal capture (inline Python -> file)"
             mkdir -p .tmp
             cat > .tmp/fallback_vitals.py <<'PY'
 import os, json, datetime, pathlib
@@ -81,7 +82,7 @@ PY
             python .tmp/fallback_vitals.py
           fi
 
-      # 6) Sanitize + MD + Transform → Sigma (bridge.py)
+      # 6) Sanitize + MD + Transform -> Sigma
       - name: Sanitize + Report + Transform → Sigma
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -98,7 +99,7 @@ PY
             --md "$OUT_MD" \
             --sigma "$OUT_SIG"
 
-      # 7) Artifacts utiles
+      # 7) Artifacts
       - name: Upload SANITIZED JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -113,7 +114,7 @@ PY
             reports/${{ steps.date.outputs.date }}/skywire_vital_report.md
             reports/${{ steps.date.outputs.date }}/skywire_sigma_analysis.json
 
-      # 8) Commit & push (sans rebase bloquant)
+      # 8) Commit & push (pas de rebase)
       - name: Commit & push reports
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -124,5 +125,4 @@ PY
           git add "reports/${DATE}" "reports/latest" || true
           git add "data/${DATE}" || true
           git commit -m "report(skywire): vitals + integration — ${DATE}" || echo "No changes to commit"
-          # pousse directement sur la branche courante
           git push origin HEAD:${GITHUB_REF_NAME}
