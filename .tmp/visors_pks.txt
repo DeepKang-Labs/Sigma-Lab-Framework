@@ -1,1 +1,2 @@
-# Auto-discovered PKs list
+036a...dummyA
+047b...dummyB

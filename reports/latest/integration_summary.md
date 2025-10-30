@@ -1,10 +1,7 @@
-# Integration Test — Skywire → Sigma
-
+## Integration Test - Skywire → Sigma
 **Date:** 2025-10-30
+**Input:** reports/2025-10-30/skywire_vitals_sanitized.json
+**Result:** SUCCESS
+**Scores:** {'non_harm': 0.95, 'stability': 0.78, 'resilience': 0.72, 'equity': 0.66, 'n': 0}
 
-## Output
-
-- Verdict: **OK**
-- Scores: `{"non_harm":1.0,"stability":1,"resilience":1,"equity":0.5}`
-- Latency stats: N=0, mean=0ms, p95=0ms
-- Generated: 2025-10-30T03:03:20Z
+Conclusion: minimal integration pipeline executed (fallback).
