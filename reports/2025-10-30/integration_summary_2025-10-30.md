@@ -1,1 +1,1 @@
-# Sigma Integration\n\n- date: 2025-10-30\n- status: fallback\n
+Auto-generated placeholder integration summary for 2025-10-30

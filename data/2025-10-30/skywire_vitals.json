@@ -77,9 +77,9 @@
       "summary": {
         "visors": 0,
         "proxies": 1409,
-        "vpn": 834,
-        "transports": 2594,
-        "dmsg_entries": 3059,
+        "vpn": 835,
+        "transports": 2629,
+        "dmsg_entries": 3064,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
@@ -152,17 +152,6 @@
               }
             },
             {
-              "address": "0208cbf61175699bd22367ab1104105c2d432117d896394cbe522fa5fb2bf3ae7f:44",
-              "type": "vpn",
-              "version": "v1.3.31",
-              "geo": {
-                "lat": 1.37,
-                "lon": 103.8,
-                "country": "SG",
-                "region": null
-              }
-            },
-            {
               "address": "0231bfa7622844f43fc60b75e7d7f50d36d02bb425ebc65a5b131f3abfe5a8f8b2:44",
               "type": "vpn",
               "version": "v1.3.28",
@@ -193,6 +182,17 @@
                 "lon": 104.75,
                 "country": "ID",
                 "region": "SS"
+              }
+            },
+            {
+              "address": "0340a16be56c7b004eca2fdc8d149d8279b756030ef20ba2ef9ca6b9e07374b949:44",
+              "type": "vpn",
+              "version": "v1.3.31",
+              "geo": {
+                "lat": 51.95,
+                "lon": 6.26,
+                "country": "NL",
+                "region": "GE"
               }
             }
           ],
