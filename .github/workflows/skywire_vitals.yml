@@ -3,7 +3,7 @@ name: Skywire/VitalSigns
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "07 00 * * *"   # tous les jours 00:07 UTC
+    - cron: "07 00 * * *"
   push:
     paths:
       - "scripts/**"
@@ -18,45 +18,41 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # 1) Checkout (full history utile pour commit des rapports)
       - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2) Python
-      - name: Setup Python
+      - name: Setup Python (minimal)
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
-      # 3) Deps minimales (pas de pandas requis)
-      - name: Install minimal deps
+      - name: Install tools (jq, curl) + light deps
         run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq curl
           python -m pip install --upgrade pip
           pip install requests pyyaml
 
-      # 4) Date (UTC) utilisable via steps.date.outputs.date
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      # 5) Prépare les dossiers
       - name: Prepare folders
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest" ".tmp"
-          mkdir -p artifacts/raw artifacts/sanitized
+          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest" "artifacts/raw" "artifacts/sanitized" ".tmp"
 
-      # 6) Valeurs sûres (auto-discovery placeholder)
       - name: Safe defaults for discovery
         run: |
           set -euo pipefail
           [ -f .tmp/visors_pks.txt ] || printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # 7) Run VitalSigns (JSON + quick MD) avec fallback inline YAML-safe
+      # --------- VITALS CAPTURE (with safe fallback) ----------
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -68,39 +64,26 @@ jobs:
           if [ -f scripts/skywire_vitals.py ]; then
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "⚠️ Fallback VitalSigns (inline mode active)"
-            mkdir -p .tmp
-            cat > .tmp/fallback_vitals.py <<'PY'
-import os, json, datetime, pathlib
+            echo "⚠️ Fallback VitalSigns: generating minimal payload"
+            printf '%s\n' \
+              '{' \
+              "  \"date_utc\": \"${DATE}\"," \
+              '  "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},' \
+              '  "groups": ["explorer","public"],' \
+              '  "payloads": [{' \
+              '    "visor": "demo",' \
+              '    "ok": true,' \
+              '    "latency_ms": 42.0' \
+              '  }]' \
+              '}' > "$OUT_JSON"
 
-date = os.environ.get("DATE","unknown")
-out_json = f"data/{date}/skywire_vitals.json"
-out_md   = f"data/{date}/skywire_summary.md"
-
-payload = {
-    "date_utc": date,
-    "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},
-    "groups": ["explorer","public"],
-    "payloads": [{"visor":"demo","ok": True,"latency_ms": 42.0}]
-}
-
-pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-
-with open(out_json,"w",encoding="utf-8") as f:
-    json.dump(payload,f,ensure_ascii=False,indent=2)
-
-with open(out_md,"w",encoding="utf-8") as f:
-    f.write(f"# Skywire VitalSigns (fallback) — {date}\n\n")
-    f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
-    f.write(f"- items: {len(payload.get('payloads',[]))}\n")
-PY
-            python .tmp/fallback_vitals.py
+            printf '# Skywire VitalSigns (fallback) — %s\n\n- generated: %sZ\n- items: 1\n' \
+              "${DATE}" "$(date -u +%FT%T)" > "$OUT_MD"
           fi
 
-          # Snapshot pour artefacts
-          cp "data/${DATE}/skywire_vitals.json" "artifacts/raw/skywire_vitals_${DATE}.json"
+          # snapshot for artefacts
+          cp "$OUT_JSON" "artifacts/raw/skywire_vitals_${DATE}.json"
 
-      # 8) Upload RAW artefact
       - name: Upload RAW JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -109,8 +92,8 @@ PY
           if-no-files-found: error
           retention-days: 7
 
-      # 9) Sanitize + quick report (détection pandas → officiel sinon fallback)
-      - name: Sanitize JSON (private → public-safe) + generate quick report
+      # --------- SANITIZE + QUICK REPORT (jq-based) ----------
+      - name: Sanitize JSON (private → public-safe) + quick report
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
@@ -119,52 +102,17 @@ PY
           OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
 
-          if [ -f scripts/skywire_vital_report.py ] && python - <<'PY' >/dev/null 2>&1
-import importlib.util; import sys
-sys.exit(0 if importlib.util.find_spec('pandas') else 1)
-PY
-          then
-            echo "✅ pandas détecté — utilisation du reporter officiel"
-            python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD"
-          else
-            echo "🪶 pandas absent — fallback léger"
-            python - <<'PY'
-import os, json, datetime, pathlib
-date = os.environ.get("DATE","unknown")
-inp = f"data/{date}/skywire_vitals.json"
-out_json = f"reports/{date}/skywire_vitals_sanitized.json"
-out_md = f"reports/{date}/skywire_vital_report.md"
+          # sanitize (drop potentially sensitive top-level keys if present)
+          jq 'del(.ip, .public_key, .debug)' "$IN" > "$OUT_SAN"
 
-with open(inp,"r",encoding="utf-8") as f:
-    data = json.load(f)
+          ITEMS=$(jq '.payloads | length' "$OUT_SAN" 2>/dev/null || echo 0)
+          printf '# Skywire Vital Report (%s)\n\n- Generated: %sZ\n- Items: %s\n' \
+            "${DATE}" "$(date -u +%FT%T)" "${ITEMS}" > "$OUT_MD"
 
-# Sanitize léger (retire des clés potentiellement sensibles si présentes au top-level)
-for k in ("ip","public_key","debug"):
-    if isinstance(data, dict) and k in data:
-        data.pop(k, None)
+          # latest pointers
+          cp "$OUT_SAN" "reports/latest/skywire_vitals_sanitized.json"
+          cp "$OUT_MD"  "reports/latest/skywire_vital_report.md"
 
-pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-with open(out_json,"w",encoding="utf-8") as f:
-    json.dump(data,f,ensure_ascii=False,indent=2)
-
-md = [
-  f"# Skywire Vital Report ({date})",
-  "",
-  f"- Generated: {datetime.datetime.utcnow().isoformat()}Z",
-  f"- Fields: {len(data) if hasattr(data,'__len__') else 'n/a'}",
-  "",
-  "This is an auto-generated minimal report."
-]
-with open(out_md,"w",encoding="utf-8") as f:
-    f.write("\n".join(md))
-PY
-          fi
-
-          # Pointeur latest
-          cp "reports/${DATE}/skywire_vitals_sanitized.json" "reports/latest/skywire_vitals_sanitized.json"
-          cp "reports/${DATE}/skywire_vital_report.md" "reports/latest/skywire_vital_report.md"
-
-      # 10) Upload SANITIZED artefact
       - name: Upload SANITIZED JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -175,7 +123,7 @@ PY
           if-no-files-found: error
           retention-days: 7
 
-      # 11) Intégration Skywire → Sigma (inline, pas de dépendance externe)
+      # --------- INTEGRATION Skywire → Sigma (bash + jq) ----------
       - name: Run Integration (Skywire → Sigma) + reports
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -185,58 +133,69 @@ PY
           OUT_JSON="reports/${DATE}/skywire_sigma_analysis_${DATE}.json"
           OUT_MD="reports/${DATE}/integration_summary_${DATE}.md"
 
-          python - <<'PY'
-import os, json, statistics, datetime, pathlib
+          # extract latencies
+          jq -r '.payloads[]? | .latency_ms // empty' "$IN" | awk '
+            { a[NR]=$1; sum+=$1 }
+            END{
+              n=NR
+              if(n==0){ print "N=0"; exit 0 }
+              # copy & sort for percentile
+              for(i=1;i<=n;i++) b[i]=a[i]
+              # simple bubble sort (n small in CI) to avoid external deps
+              for(i=1;i<=n;i++) for(j=i+1;j<=n;j++) if(b[i]>b[j]){ t=b[i]; b[i]=b[j]; b[j]=t }
+              # mean
+              mean=sum/n
+              # p95 index (ceil)
+              idx=int(0.95*n); if(idx<1) idx=1; if(idx>n) idx=n
+              p95=b[idx]
+              printf "N=%d MEAN=%.6f P95=%.6f\n", n, mean, p95
+            }
+          ' > .tmp/lat_stats.txt || true
 
-date = os.environ.get("DATE","unknown")
-inp = f"reports/{date}/skywire_vitals_sanitized.json"
-out_json = f"reports/{date}/skywire_sigma_analysis_{date}.json"
-out_md = f"reports/{date}/integration_summary_{date}.md"
+          if grep -q '^N=0' .tmp/lat_stats.txt; then
+            N=0; MEAN=0; P95=0
+          else
+            eval "$(cat .tmp/lat_stats.txt)"   # sets N, MEAN, P95
+          fi
 
-with open(inp,"r",encoding="utf-8") as f:
-    data = json.load(f)
+          # simple scoring in [0,1]
+          non_harm=1.0
+          # stability: the lower the mean latency, the higher the score
+          stability=$(awk -v m="$MEAN" 'BEGIN{ s=1.0-(m/1000.0); if(s<0) s=0; if(s>1) s=1; print s }')
+          # resilience: based on p95
+          resilience=$(awk -v p="$P95" 'BEGIN{ s=1.0-(p/1500.0); if(s<0) s=0; if(s>1) s=1; print s }')
+          # equity: crude diversity proxy = unique visors count
+          U=$(jq -r '[.payloads[]? | .visor] | unique | length' "$IN" 2>/dev/null || echo 0)
+          equity=$(awk -v u="$U" 'BEGIN{ s=0.5+0.1*u; if(s<0) s=0; if(s>1) s=1; print s }')
 
-payloads = data.get("payloads", [])
-latencies = [p.get("latency_ms") for p in payloads if isinstance(p, dict) and isinstance(p.get("latency_ms"), (int,float))]
+          verdict="OBSERVE"
+          awk -v st="$stability" -v re="$resilience" 'BEGIN{ if(st>=0.5 && re>=0.5) exit 0; else exit 1 }'
+          if [ $? -eq 0 ]; then verdict="OK"; fi
 
-non_harm = 1.0
-stability = 0.5
-resilience = 0.5
-equity = 0.5
+          # write JSON
+          jq -n \
+            --arg date "$DATE" \
+            --argjson scores "{\"non_harm\":$non_harm,\"stability\":$stability,\"resilience\":$resilience,\"equity\":$equity}" \
+            --arg verdict "$verdict" \
+            '{date:$date, scores:($scores), verdict:$verdict}' \
+            > "$OUT_JSON"
 
-if latencies:
-    p50 = statistics.median(latencies)
-    p95 = statistics.quantiles(latencies, n=20)[18] if len(latencies) >= 20 else max(latencies)
-    stability = max(0.0, min(1.0, 1.0 - (p50/1000.0)))
-    resilience = max(0.0, min(1.0, 1.0 - (p95/1500.0)))
+          # write MD
+          {
+            echo "# Integration Test — Skywire → Sigma"
+            echo
+            echo "**Date:** $DATE"
+            echo
+            echo "## Output"
+            echo
+            echo "- Verdict: **$verdict**"
+            echo "- Scores: \`$(cat "$OUT_JSON" | jq -c .scores)\`"
+            echo "- Latency stats: N=$N, mean=${MEAN}ms, p95=${P95}ms"
+            echo "- Generated: $(date -u +%FT%TZ)"
+          } > "$OUT_MD"
 
-equity = 0.5 + 0.1 * len(set([p.get("visor") for p in payloads if isinstance(p, dict) and p.get("visor")]))
-equity = max(0.0, min(1.0, equity))
+          cp "$OUT_MD" "reports/latest/integration_summary.md"
 
-scores = {
-  "non_harm": round(non_harm,3),
-  "stability": round(stability,3),
-  "resilience": round(resilience,3),
-  "equity": round(equity,3)
-}
-verdict = "OK" if scores["stability"]>=0.5 and scores["resilience"]>=0.5 else "OBSERVE"
-
-pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-with open(out_json,"w",encoding="utf-8") as f:
-    json.dump({"date":date, "scores":scores, "verdict":verdict}, f, ensure_ascii=False, indent=2)
-
-with open(out_md,"w",encoding="utf-8") as f:
-    f.write("# Integration Test — Skywire → Sigma\n\n")
-    f.write(f"**Date:** {date}\n\n")
-    f.write("## Output\n\n")
-    f.write(f"- Verdict: **{verdict}**\n")
-    f.write(f"- Scores: `{scores}`\n")
-    f.write(f"- Generated: {datetime.datetime.utcnow().isoformat()}Z\n")
-PY
-
-          cp "reports/${DATE}/integration_summary_${DATE}.md" "reports/latest/integration_summary.md"
-
-      # 12) Artefacts d’intégration
       - name: Upload Integration Reports (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -247,13 +206,12 @@ PY
           if-no-files-found: error
           retention-days: 7
 
-      # 13) Commit & push des rapports
       - name: Commit & push reports
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add reports/
           git commit -m "report(skywire): vitals + integration — ${DATE}" || echo "No changes to commit"
