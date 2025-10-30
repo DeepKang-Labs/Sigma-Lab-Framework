@@ -1,150 +1,214 @@
 #!/usr/bin/env python3
-# ============================================================
-# Runner — Network Bridge (Generic)
-# Robust import strategy for CI and direct execution
-# ============================================================
+# -*- coding: utf-8 -*-
+"""
+Skywire → Sigma integration runner
+- Loads a Skywire vitals JSON (either via --input or by auto-discovery)
+- Computes Sigma metrics using engine.SigmaAnalyzer
+- Writes:
+    - JSON result: reports/integrations/skywire_sigma_analysis_YYYY-MM-DD.json
+    - Markdown summary: reports/integrations/skywire_sigma_analysis_YYYY-MM-DD.md (if --also-md)
+    - Claude-style Integration Test Report: reports/integrations/Integration_Test_Report_YYYY-MM-DD.md (if --claude-report)
+- Prints a short status line to stdout.
+"""
 
-import os
-import sys
-import json
+from __future__ import annotations
 import argparse
-import yaml
+import json
+import sys
+from pathlib import Path
+from datetime import datetime
 
-# --- Robust import: try absolute, then local fallback ---
+# Local import
 try:
-    # Preferred: package import (works when network_bridge is a package)
-    from network_bridge.network_bridge import NetworkBridge
-except Exception:
-    # Fallback: add this script's folder to sys.path and import the module file
-    THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-    if THIS_DIR not in sys.path:
-        sys.path.insert(0, THIS_DIR)
-    from network_bridge import NetworkBridge  # type: ignore
+    from engine.core import SigmaAnalyzer
+except Exception as e:
+    print(f"[ERROR] Unable to import SigmaAnalyzer: {e}", file=sys.stderr)
+    sys.exit(2)
 
 
-def _benchmark_compare(results, baseline):
-    dims = ["non_harm", "stability", "resilience", "equity"]
-    avg = {d: 0.0 for d in dims}
-    if results:
-        for d in dims:
-            avg[d] = sum(r.get("scores", {}).get(d, 0) for r in results) / len(results)
-    base = baseline.get("target_scores", {})
-    delta = {d: round(avg[d] - float(base.get(d, 0.0)), 3) for d in dims}
-    return {"average_scores": avg, "baseline": base, "delta": delta}
+def _find_latest_vitals(discovery_root: Path) -> Path | None:
+    candidates: list[Path] = []
+    for p in discovery_root.rglob("skywire_vitals.json"):
+        candidates.append(p)
+    if not candidates:
+        return None
+
+    def date_from_path(p: Path):
+        try:
+            return datetime.strptime(p.parent.name, "%Y-%m-%d")
+        except Exception:
+            return None
+
+    dated = [(p, date_from_path(p)) for p in candidates]
+    dated = [x for x in dated if x[1] is not None]
+    if dated:
+        dated.sort(key=lambda x: x[1])
+        return dated[-1][0]
+
+    candidates.sort(key=lambda p: p.stat().st_mtime)
+    return candidates[-1]
 
 
-def _demo_results(contexts):
-    out = []
-    for _ in contexts:
-        out.append({
-            "scores": {"non_harm": 0.68, "stability": 0.61, "resilience": 0.77, "equity": 0.52},
-            "vetoes": [],
-            "verdict": None
-        })
-    return out
+def _write_json(out_path: Path, payload: dict) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--network", choices=["skywire", "fiber"], default="skywire")
-    ap.add_argument("--discovery", type=str, default="./discovery")
-    ap.add_argument("--config", type=str, default="./sigma_config_placeholder.yaml")
-    ap.add_argument("--mappings", type=str, required=True)
-    ap.add_argument("--out", type=str, default="./pilots/validation_logs/network_validate_only.json")
-    ap.add_argument("--export-contexts", type=str, default=None)
-    ap.add_argument("--benchmark", type=str, default=None)
-    ap.add_argument("--validate-only", action="store_true")
-    ap.add_argument("--formula-eval", choices=["auto","linear","simple"], default="auto")
-    ap.add_argument("--pretty", action="store_true")
-    args = ap.parse_args()
-
-    print(f"🚀 Network Bridge ({args.network}) — validate_only={args.validate_only} mode")
-    print("=" * 60)
-
-    bridge = NetworkBridge(
-        discovery_kit_path=args.discovery,
-        sigma_config_path=args.config,
-        mappings_path=args.mappings,
-        export_contexts_dir=args.export_contexts,
-        network_name=args.network,
-        formula_eval_mode=args.formula_eval,
-    )
-
-    # 1) Load & validate discovery
-    print("1) Loading discovery data…")
-    discovery_data = bridge.load_discovery_data()
-    warnings = bridge.validate_discovery(discovery_data)
-    for w in warnings:
-        print(f"   ⚠️  {w}")
-    print(f"   → {len(discovery_data.get('decision_points', []))} decision(s) found")
-
-    if args.validate_only:
-        contexts = bridge.transform_to_sigma_contexts(discovery_data)
-        print(f"   → {len(contexts)} SIGMA context(s) generated (validate-only).")
-        report = bridge.generate_integration_report(discovery_data, _demo_results(contexts), extra_meta=None)
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
-        with open(args.out, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2 if args.pretty else None, ensure_ascii=False)
-        print(f"✅ Validate-only report saved → {args.out}")
-        return
-
-    # 2) Transform → SIGMA contexts
-    print("2) Transform discovery → SIGMA contexts")
-    sigma_contexts = bridge.transform_to_sigma_contexts(discovery_data)
-    print(f"   → {len(sigma_contexts)} context(s) generated")
-
-    if args.export_contexts:
-        print(f"   ↳ Exporting contexts → {args.export_contexts}")
-        bridge.export_sigma_contexts(sigma_contexts)
-
-    # 3) Run Sigma-Lab (try, else demo)
-    print("3) Running Sigma-Lab diagnostics…")
-    sigma_results = []
-    try:
-        from sigma_lab_v4_2 import SigmaLab, demo_context, OptionContext, Stakeholder
-        base_cfg, _ = demo_context("public")
-        engine = SigmaLab(base_cfg)
-
-        for c in sigma_contexts:
-            stakeholders = [Stakeholder(**s) for s in c["stakeholders"]]
-            ctx = OptionContext(
-                name=c["name"],
-                short_term_risk=c["short_term_risk"],
-                long_term_risk=c["long_term_risk"],
-                irreversibility_risk=c["irreversibility_risk"],
-                stakeholders=stakeholders,
-                stability_risks=c["stability_risks"],
-                resilience_features=c["resilience_features"],
-                metadata=c.get("metadata", {})
-            )
-            res = engine.diagnose(ctx, verdict_opt_in=True)
-            sigma_results.append(res)
-
-    except Exception as e:
-        print(f"   ⚠️ Sigma-Lab not available: {e}")
-        print("   → Generating deterministic demo results")
-        sigma_results = _demo_results(sigma_contexts)
-
-    # 4) Benchmark (optional)
-    meta = {}
-    if args.benchmark and os.path.exists(args.benchmark):
-        print("4) Running benchmark comparison…")
-        with open(args.benchmark, "r", encoding="utf-8") as f:
-            baseline = yaml.safe_load(f) or {}
-        meta["benchmark"] = _benchmark_compare(sigma_results, baseline)
+def _write_markdown(md_path: Path, result: dict, source: Path) -> None:
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    comp = result.get("component_scores", {})
+    advice = result.get("advice", [])
+    verdict = result.get("verdict", "Unknown")
+    score = result.get("overall_score", 0.0)
+    timestamp = result.get("timestamp_utc", "")
+    lines = []
+    lines.append("# Skywire → Sigma Analysis\n")
+    lines.append(f"**Timestamp (UTC):** {timestamp}\n")
+    lines.append(f"**Source:** `{source.as_posix()}`\n")
+    lines.append(f"**Verdict:** **{verdict}**\n")
+    lines.append(f"**Overall Score:** **{score:.2f} / 100**\n")
+    lines.append("\n## Component Scores (0..1)\n")
+    for k in ("stability", "latency", "resilience", "equity"):
+        if k in comp:
+            lines.append(f"- `{k}`: **{comp[k]:.3f}**")
+    lines.append("\n## Advice\n")
+    if advice:
+        for a in advice:
+            lines.append(f"- {a}")
     else:
-        print("4) Benchmark skipped (no baseline provided)")
+        lines.append("- (no advice)")
+    lines.append("")
+    md = "\n".join(lines)
+    with md_path.open("w", encoding="utf-8") as f:
+        f.write(md)
 
-    # 5) Report
-    print("5) Building integration report…")
-    report = bridge.generate_integration_report(discovery_data, sigma_results, extra_meta=meta)
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2 if args.pretty else None, ensure_ascii=False)
-    print(f"✅ Done. Report saved → {args.out}")
+
+def _write_claude_report(md_path: Path, date_str: str, source: Path, duration_s: float,
+                         result: dict, metrics_preview: dict) -> None:
+    """
+    Generate the exact “Integration Test Report” format Claude requested.
+    """
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    verdict = result.get("verdict", "Unknown")
+    overall = result.get("overall_score", 0.0)
+    lines = []
+    lines.append("## Integration Test Report\n")
+    lines.append(f"**Date:** {date_str}\n")
+    lines.append("**Test:** Skywire vitals → Sigma-Lab diagnostic\n")
+    lines.append("\n### Input")
+    lines.append(f"- Source: `{source.as_posix()}`")
+    # Show 3–5 key metrics extracted (preview)
+    if metrics_preview:
+        lines.append(f"- Metrics: {json.dumps(metrics_preview, indent=2)}")
+    else:
+        lines.append("- Metrics: {}")
+    lines.append("\n### Processing")
+    lines.append("- Command: `python network_bridge/run_network_integrated.py --network skywire ...`")
+    lines.append(f"- Duration: ~{int(duration_s)} seconds")
+    lines.append("- Status: SUCCESS")
+    lines.append("\n### Output")
+    out_json_name = f"reports/integrations/skywire_sigma_analysis_{date_str}.json"
+    lines.append(f"- File: `{out_json_name}`")
+    comp = result.get("component_scores", {})
+    lines.append(f"- Scores: {json.dumps(comp, indent=2)}")
+    lines.append(f"- Verdict: **{verdict}** (overall **{overall:.2f} / 100**)")
+    lines.append("\n### Learnings")
+    lines.append("- What worked: Integration pipeline executed end-to-end (data → analyzer → report).")
+    lines.append("- What needs improvement: Expand feature extraction; tune weights and latency normalization with real node data.")
+    lines.append("")
+    with md_path.open("w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def main() -> int:
+    import time
+    parser = argparse.ArgumentParser(description="Run SigmaAnalyzer on Skywire vitals and emit reports.")
+    parser.add_argument("--network", type=str, required=True, help="Network name (use 'skywire').")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--input", type=str, help="Path to a specific vitals JSON file.")
+    group.add_argument("--discovery", type=str, help="Folder to search for latest skywire_vitals.json (e.g., data/).")
+    parser.add_argument("--out", type=str, default="", help="Optional output JSON path.")
+    parser.add_argument("--also-md", action="store_true", help="Also writes a concise Markdown summary.")
+    parser.add_argument("--claude-report", action="store_true", help="Writes Integration Test Report in Claude's format.")
+    args = parser.parse_args()
+
+    if args.network.lower() != "skywire":
+        print(f"[ERROR] Unsupported network: {args.network}", file=sys.stderr)
+        return 2
+
+    # Resolve source
+    if args.input:
+        source_path = Path(args.input)
+        if not source_path.is_file():
+            print(f"[ERROR] Input file not found: {source_path}", file=sys.stderr)
+            return 2
+    else:
+        discovery_root = Path(args.discovery)
+        if not discovery_root.exists():
+            print(f"[ERROR] Discovery root not found: {discovery_root}", file=sys.stderr)
+            return 2
+        source_path = _find_latest_vitals(discovery_root)
+        if source_path is None:
+            print(f"[ERROR] No 'skywire_vitals.json' found under {discovery_root}", file=sys.stderr)
+            return 2
+
+    # Analyze
+    analyzer = SigmaAnalyzer()
+    t0 = time.monotonic()
+    try:
+        result = analyzer.evaluate_from_file(source_path)
+    except Exception as e:
+        print(f"[ERROR] Analysis failed: {e}", file=sys.stderr)
+        return 1
+    duration = time.monotonic() - t0
+
+    # Decide outputs
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if args.out:
+        out_json = Path(args.out)
+    else:
+        out_json = Path("reports/integrations") / f"skywire_sigma_analysis_{today}.json"
+
+    _write_json(out_json, result)
+
+    if args.also_md:
+        md_path = out_json.with_suffix(".md")
+        _write_markdown(md_path, result, source_path)
+
+    if args.claude_report:
+        # Minimal preview of metrics used by the analyzer (recomputed from file)
+        try:
+            with source_path.open("r", encoding="utf-8") as f:
+                raw = json.load(f)
+            payloads = raw.get("payloads", [])
+            n = len(payloads)
+            def get(p, k, d=0.0):
+                try:
+                    return float(p.get(k, d))
+                except Exception:
+                    return d
+            avg_uptime = sum(get(p, "uptime", 0.0) for p in payloads) / max(n, 1)
+            avg_latency = sum(get(p, "latency_ms", 0.0) for p in payloads) / max(n, 1)
+            success_ratio = sum(get(p, "success_ratio", 0.0) for p in payloads) / max(n, 1)
+            preview = {
+                "node_count": n,
+                "avg_uptime": round(avg_uptime, 4),
+                "avg_latency_ms": round(avg_latency, 2),
+                "success_ratio": round(success_ratio, 4),
+            }
+        except Exception:
+            preview = {}
+        cr_md = Path("reports/integrations") / f"Integration_Test_Report_{today}.md"
+        _write_claude_report(cr_md, today, source_path, duration, result, preview)
+
+    print(
+        f"[OK] Skywire→Sigma done | verdict={result.get('verdict')} "
+        f"| overall={result.get('overall_score')} | json={out_json.as_posix()} "
+        f"| took={int(duration)}s"
+    )
+    return 0
 
 
 if __name__ == "__main__":
-    # Support execution as a script: python network_bridge/run_network_integrated.py ...
-    # Also works as module: python -m network_bridge.run_network_integrated ...
-    main()
+    sys.exit(main())
