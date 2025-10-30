@@ -3,18 +3,22 @@ name: Skywire VitalSigns
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 03 * * *"   # daily 03:17 UTC
+    - cron: "17 03 * * *" # daily 03:17 UTC
+
+concurrency:
+  group: skywire-vitals-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write   # nécessaire pour push avec GITHUB_TOKEN
+  contents: write
 
 jobs:
   vitals:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout (full history, with token)
+      - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -28,10 +32,8 @@ jobs:
       - name: Install dependencies
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y jq
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests pyyaml
 
       - name: Date stamp (UTC)
         id: date
@@ -49,15 +51,11 @@ jobs:
           set -euo pipefail
           mkdir -p .tmp
           echo "# Auto-discovered PKs list" > .tmp/visors_pks.txt
-          # Récupère la liste des visors; si vide/erreur, on log un warn mais on continue
-          if curl -fsS "https://sd.skycoin.com/api/services?type=visor" \
-            | jq -er 'map(.pk?) | map(select(.!=null)) | .[]' >> .tmp/visors_pks.txt; then
-            echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
-          else
-            echo "[Warn] PKs auto-discovery failed or returned empty list."
-          fi
+          # Découverte des visors publiés (si JSON avec .pk)
+          curl -sS "https://sd.skycoin.com/api/services?type=visor" | jq -r '.[].pk?' | sed '/^null$/d;/^$/d' >> .tmp/visors_pks.txt || true
+          echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
 
-      - name: Run VitalSigns (produce JSON + Markdown)
+      - name: Run VitalSigns (produce JSON)
         env:
           TODAY: ${{ steps.date.outputs.date }}
         run: |
@@ -66,8 +64,7 @@ jobs:
           python scripts/skywire_vitals.py
           echo "✅ Wrote vital data for ${TODAY}"
 
-      - name: Upload RAW JSON (private artifact)
-        if: always()
+      - name: Upload RAW JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: skywire_vitals_raw_${{ steps.date.outputs.date }}
@@ -75,46 +72,35 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # -------- SANITIZE (version sûre via fichier temporaire) --------
-      - name: Sanitize JSON (remove sensitive data)
+      - name: Sanitize JSON (private → public-safe)
         env:
           TODAY: ${{ steps.date.outputs.date }}
         run: |
-          set -euo pipefail
-          mkdir -p .tmp
-          cat > .tmp/sanitize.py <<'PY'
+          set -e
+          python - <<'PY'
           import os, json, sys
-
           today = os.getenv("TODAY")
           p = f"data/{today}/skywire_vitals.json"
           q = f"data/{today}/skywire_vitals_sanitized.json"
-
           try:
               with open(p) as f:
                   doc = json.load(f)
           except FileNotFoundError:
               print("⚠️ No raw JSON found.")
               sys.exit(0)
-
           for g in doc.get("groups", []):
               if g.get("name") == "nodes":
-                  # ne jamais publier la liste de PK
                   g["visors_pks"] = []
                   s = g.get("summary", {}) or {}
                   if "ut_note" in s:
                       s["ut_note"] = "(redacted)"
                   g["summary"] = s
-
           with open(q, "w") as f:
               json.dump(doc, f, indent=2, ensure_ascii=False)
-
           print(f"✅ Sanitized written: {q}")
           PY
 
-          python .tmp/sanitize.py
-
-      - name: Upload SANITIZED JSON (private artifact)
-        if: always()
+      - name: Upload SANITIZED JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: skywire_vitals_sanitized_${{ steps.date.outputs.date }}
@@ -122,14 +108,39 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Commit & push summary (rebase-safe)
+      # ========= NOUVELLE ÉTAPE : Intégration Skywire → Sigma =========
+      - name: Install local engine deps for integration
+        run: |
+          set -euo pipefail
+          # dépendances minimales pour run_network_integrated.py
+          pip install --no-cache-dir pyyaml
+
+      - name: Run Integration (Skywire → Sigma) + reports
+        run: |
+          set -euo pipefail
+          python network_bridge/run_network_integrated.py \
+            --network skywire \
+            --discovery data/ \
+            --also-md \
+            --claude-report
+
+      - name: Upload Integration Reports (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma_integration_${{ steps.date.outputs.date }}
+          path: reports/integrations/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Commit & push reports
         env:
           TODAY: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
           git config user.name  "sigma-bot"
-          git config user.email "actions@github.com"
-          git add -A
-          git commit -m "chore(data): Skywire VitalSigns daily snapshot for ${TODAY}" || echo "No changes to commit."
-          git pull --rebase --autostash
+          git config user.email "sigma-bot@deepkang.labs"
+          git add reports/integrations/ || true
+          git add data/${TODAY}/skywire_vitals*.json || true
+          git commit -m "chore(reports): Skywire→Sigma integration run for ${TODAY}" || echo "No changes to commit."
+          git pull --rebase
           git push
