@@ -13,50 +13,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout complet (historique nécessaire pour push/rebase)
       - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2) Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3) Dépendances minimales (pandas inclus pour le reporter)
-      - name: Install minimal deps
+      - name: Install deps
         run: |
-          set -euo pipefail
-          if [ -f requirements.txt ]; then
-            python -m pip install -U pip
-            pip install -r requirements.txt
-          else
-            python -m pip install -U pip
-            pip install "requests>=2.31" "pandas>=2.0" "pyyaml>=6.0"
-          fi
+          python -m pip install -U pip
+          pip install "requests>=2.31" "pandas>=2.0" "pyyaml>=6.0"
 
-      # 4) Datestamp
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
-      # 5) Prépare les dossiers
       - name: Prepare folders
         run: |
-          set -euo pipefail
           DATE="${{ steps.date.outputs.date }}"
           mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest" ".tmp"
           mkdir -p artifacts/raw artifacts/sanitized
 
-      # 6) Valeurs sûres (placeholder auto-discovery)
       - name: Safe defaults for discovery
         run: |
-          set -euo pipefail
           printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # 7) Run VitalSigns (JSON + quick MD) avec fallback YAML-safe
+      # -------------------------------
+      #  Run VitalSigns
+      # -------------------------------
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -66,52 +54,47 @@ jobs:
           OUT_MD="data/${DATE}/skywire_summary.md"
 
           if [ -f scripts/skywire_vitals.py ]; then
-            echo "▶ Using scripts/skywire_vitals.py"
+            echo "✅ Using scripts/skywire_vitals.py"
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "⚠️ Fallback VitalSigns (inline mode active)"
+            echo "⚠️ Fallback VitalSigns (inline mode)"
             mkdir -p .tmp
-            # on écrit un petit script fallback dans un fichier temporaire (pas de heredoc YAML)
-            printf "%s\n" \
-"import os, json, datetime, pathlib" \
-"date = os.environ.get('DATE','unknown')" \
-"out_json = f'data/{date}/skywire_vitals.json'" \
-"out_md   = f'data/{date}/skywire_summary.md'" \
-"payload = {" \
-"  'date_utc': date," \
-"  'meta': {'source':'fallback','repo':'Sigma-Lab-Framework'}," \
-"  'groups': ['explorer','public']," \
-"  'payloads': [{'visor':'demo','ok': True,'latency_ms': 42.0}]" \
-"}" \
-"pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)" \
-"with open(out_json,'w',encoding='utf-8') as f:" \
-"    json.dump(payload,f,ensure_ascii=False,indent=2)" \
-"with open(out_md,'w',encoding='utf-8') as f:" \
-"    f.write(f'# Skywire VitalSigns (fallback) — {date}\\n\\n')" \
-"    f.write(f'- generated: {datetime.datetime.utcnow().isoformat()}Z\\n')" \
-"    f.write(f'- items: {len(payload.get(\"payloads\",[]))}\\n')" \
-            > .tmp/fallback_vitals.py
+            cat <<'PY' > .tmp/fallback_vitals.py
+import os, json, datetime, pathlib
+
+date = os.environ.get("DATE", "unknown")
+out_json = f"data/{date}/skywire_vitals.json"
+out_md   = f"data/{date}/skywire_summary.md"
+
+payload = {
+    "date_utc": date,
+    "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
+    "groups": ["explorer", "public"],
+    "payloads": [{"visor": "demo", "ok": True, "latency_ms": 42.0}],
+}
+
+pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
+with open(out_json, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+
+with open(out_md, "w", encoding="utf-8") as f:
+    f.write(f"# Skywire VitalSigns (fallback) — {date}\n\n")
+    f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
+    f.write(f"- items: {len(payload.get('payloads', []))}\n")
+PY
             python .tmp/fallback_vitals.py
           fi
 
-      # 8) Upload du JSON brut en artefact
       - name: Upload RAW JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: skywire_raw_${{ steps.date.outputs.date }}
-          path: artifacts/raw/*
-          if-no-files-found: error
+          path: data/${{ steps.date.outputs.date }}/skywire_vitals.json
           retention-days: 7
-        # On copie vers artifacts avant l'upload
-        if: always()
-      - name: Snapshot raw → artifacts
-        env:
-          DATE: ${{ steps.date.outputs.date }}
-        run: |
-          set -euo pipefail
-          cp "data/${DATE}/skywire_vitals.json" "artifacts/raw/skywire_vitals_${DATE}.json"
 
-      # 9) Sanitize + quick report (utilise le reporter officiel s'il existe)
+      # -------------------------------
+      #  Sanitize + quick report
+      # -------------------------------
       - name: Sanitize JSON (private → public-safe) + generate quick report
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -121,153 +104,55 @@ jobs:
           OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
 
-          if [ -f scripts/skywire_vital_report.py ]; then
+          if python -c "import pandas" >/dev/null 2>&1 && [ -f scripts/skywire_vital_report.py ]; then
             echo "✅ Using official reporter"
             python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD"
           else
-            echo "⚠️ Using lightweight fallback reporter"
-            printf "%s\n" \
-"import json, os, pathlib, datetime" \
-"date = os.environ.get('DATE','unknown')" \
-"in_p  = f'data/{date}/skywire_vitals.json'" \
-"out_j = f'reports/{date}/skywire_vitals_sanitized.json'" \
-"out_m = f'reports/{date}/skywire_vital_report.md'" \
-"pathlib.Path(os.path.dirname(out_j)).mkdir(parents=True, exist_ok=True)" \
-"with open(in_p,'r',encoding='utf-8') as f: data = json.load(f)" \
-"if isinstance(data, dict):" \
-"    for k in ('ip','public_key','debug'): data.pop(k, None)" \
-"with open(out_j,'w',encoding='utf-8') as f: json.dump(data,f,ensure_ascii=False,indent=2)" \
-"md=[f'# Skywire Vital Report ({date})','',f'- Generated: {datetime.datetime.utcnow().isoformat()}Z','',f'- Fields: {len(data) if hasattr(data,\"__len__\") else \"n/a\"}','', 'This is an auto-generated minimal report.']" \
-"with open(out_m,'w',encoding='utf-8') as f: f.write('\\n'.join(md))" \
-            > .tmp/fallback_sanitize.py
+            echo "⚠️ Using fallback reporter (no pandas)"
+            cat <<'PY' > .tmp/fallback_sanitize.py
+import json, os, datetime, pathlib
+
+date = os.environ.get("DATE", "unknown")
+inp = f"data/{date}/skywire_vitals.json"
+out_j = f"reports/{date}/skywire_vitals_sanitized.json"
+out_m = f"reports/{date}/skywire_vital_report.md"
+
+pathlib.Path(os.path.dirname(out_j)).mkdir(parents=True, exist_ok=True)
+with open(inp, "r", encoding="utf-8") as f:
+    data = json.load(f)
+for k in ("ip", "public_key", "debug"):
+    if isinstance(data, dict):
+        data.pop(k, None)
+with open(out_j, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+
+md = [
+    f"# Skywire Vital Report ({date})",
+    "",
+    f"- Generated: {datetime.datetime.utcnow().isoformat()}Z",
+    "",
+    f"- Fields: {len(data) if hasattr(data, '__len__') else 'n/a'}",
+    "",
+    "This is an auto-generated minimal report.",
+]
+with open(out_m, "w", encoding="utf-8") as f:
+    f.write("\n".join(md))
+PY
             python .tmp/fallback_sanitize.py
           fi
 
-      # 10) Upload SANITIZED JSON (artifact)
-      - name: Upload SANITIZED JSON (artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: skywire_sanitized_${{ steps.date.outputs.date }}
-          path: artifacts/sanitized/*
-          if-no-files-found: error
-          retention-days: 7
-        if: always()
-      - name: Snapshot sanitized → artifacts
-        env:
-          DATE: ${{ steps.date.outputs.date }}
-        run: |
-          set -euo pipefail
-          cp "reports/${DATE}/skywire_vitals_sanitized.json" "artifacts/sanitized/skywire_vitals_sanitized_${DATE}.json"
-
-      # 11) Rendre l'engine importable (PYTHONPATH)
-      - name: Make engine importable (package + PYTHONPATH)
-        run: |
-          set -euo pipefail
-          echo "PYTHONPATH=$PWD:$PYTHONPATH" >> $GITHUB_ENV
-          if [ -f engine/__init__.py ]; then
-            echo "engine package ok"
-          else
-            mkdir -p engine && echo "# pkg" > engine/__init__.py
-          fi
-
-      # 12) Intégration Skywire → Sigma + génération des rapports d'intégration
-      - name: Run Integration (Skywire → Sigma) + reports
-        env:
-          DATE: ${{ steps.date.outputs.date }}
-        run: |
-          set -euo pipefail
-          IN_JSON="data/${DATE}/skywire_vitals.json"
-          OUT_ANALYSIS="reports/${DATE}/skywire_sigma_analysis_${DATE}.json"
-          OUT_SUMMARY="reports/${DATE}/integration_summary_${DATE}.md"
-
-          if [ -f network_bridge/run_network_integrated.py ]; then
-            echo "▶ Running network_bridge/run_network_integrated.py"
-            python network_bridge/run_network_integrated.py \
-              --network skywire \
-              --discovery "data/${DATE}/" \
-              --input "$IN_JSON" \
-              --out "$OUT_ANALYSIS"
-          else
-            echo "⚠️ Fallback: synthèse simple d'intégration"
-            printf "%s\n" \
-"import json, os, pathlib, datetime" \
-"date = os.environ.get('DATE','unknown')" \
-"in_p  = f'data/{date}/skywire_vitals.json'" \
-"out_p = f'reports/{date}/skywire_sigma_analysis_{date}.json'" \
-"pathlib.Path(os.path.dirname(out_p)).mkdir(parents=True, exist_ok=True)" \
-"try:" \
-"    with open(in_p,'r',encoding='utf-8') as f: data=json.load(f)" \
-"except Exception as e:" \
-"    data={'error':str(e)}" \
-"analysis={'non_harm':0.87,'stability':0.78,'resilience':0.74,'equity':0.66,'source':'fallback','ts':datetime.datetime.utcnow().isoformat()+'Z'}" \
-"with open(out_p,'w',encoding='utf-8') as f: json.dump({'input_summary':str(type(data)),'scores':analysis},f,indent=2)" \
-            > .tmp/fallback_integration.py
-            python .tmp/fallback_integration.py
-          fi
-
-          # mini résumé Markdown d'intégration
-          python - <<'PY'
-import os, json, datetime, pathlib
-date=os.environ.get('DATE','unknown')
-an=f"reports/{date}/skywire_sigma_analysis_{date}.json"
-out=f"reports/{date}/integration_summary_{date}.md"
-pathlib.Path(os.path.dirname(out)).mkdir(parents=True, exist_ok=True)
-try:
-    data=json.load(open(an,encoding="utf-8"))
-    scores=data.get("scores",{})
-except Exception as e:
-    scores={"error":str(e)}
-md=[
-  f"# Integration Test Report",
-  f"**Date:** {date}",
-  "",
-  "### Input",
-  f"- Source: `data/{date}/skywire_vitals.json`",
-  "",
-  "### Output",
-  f"- File: `reports/{date}/skywire_sigma_analysis_{date}.json`",
-  "",
-  "### Scores",
-  f"- non_harm: {scores.get('non_harm','n/a')}",
-  f"- stability: {scores.get('stability','n/a')}",
-  f"- resilience: {scores.get('resilience','n/a')}",
-  f"- equity: {scores.get('equity','n/a')}",
-  "",
-  "### Verdict",
-  "Integration pipeline executed (see JSON for details).",
-]
-open(out,"w",encoding="utf-8").write("\n".join(md))
-# pointeurs "latest"
-import shutil
-shutil.copy(out, "reports/latest/integration_summary.md")
-shutil.copy(f"reports/{date}/skywire_vital_report.md","reports/latest/skywire_vital_report.md")
-shutil.copy(f"reports/{date}/skywire_vitals_sanitized.json","reports/latest/skywire_vitals_sanitized.json")
-PY
-
-      # 13) Upload des rapports d'intégration (artefacts)
-      - name: Upload Integration Reports (artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration_reports_${{ steps.date.outputs.date }}
-          path: |
-            reports/${{ steps.date.outputs.date }}/*
-            reports/latest/*
-          if-no-files-found: error
-          retention-days: 7
-
-      # 14) Commit & push avec fetch/rebase sûrs
-      - name: Commit & push reports (safe fast-forward)
+      # -------------------------------
+      #  Commit & push (safe rebase)
+      # -------------------------------
+      - name: Commit & push reports (safe)
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git fetch origin main
-          # Essaye rebase, sinon merge en conservant nos versions
           git rebase origin/main || git merge --strategy-option ours origin/main
-
           git add reports/
-          git commit -m "report(skywire): vitals + integration — ${DATE}" || echo "No changes to commit"
+          git commit -m "report(skywire): vitals + sanitized — ${DATE}" || echo "No changes"
           git push origin HEAD:main
