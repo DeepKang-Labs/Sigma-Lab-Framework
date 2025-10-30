@@ -198,12 +198,22 @@ jobs:
         run: |
           set -euo pipefail
           d="${{ steps.date.outputs.date }}"
-          git add "data/$d/skywire_vitals.json" "data/$d/skywire_summary.md" "reports/$d" "reports/latest" || true
+
+          # 1) Se synchroniser AVANT de stage/commit
+          git fetch origin main
+          # Fast-forward only (pas de rebase/merge qui casse avec des fichiers non indexés)
+          git pull --ff-only origin main || true
+
+          # 2) Stager TOUT ce qu'on a produit (y compris badges/CSV/MD/JSON)
+          git add -A
+
+          # 3) Commit seulement s'il y a des diffs
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "report(skywire): vitals + integration — $d"
-          git fetch origin main
-          git rebase origin/main
+
+          git commit -m "report(skywire): vitals + integration — ${d}"
+
+          # 4) Push (fast-forward)
           git push origin HEAD:main
