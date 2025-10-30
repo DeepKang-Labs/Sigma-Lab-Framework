@@ -1,4 +1,4 @@
-name: Sigma • Skywire capture → Sigma integration
+name: Sigma skywire to sigma integration
 
 on:
   workflow_dispatch:
@@ -8,13 +8,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 0) Checkout
-      - name: Checkout (full)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 1) Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -25,25 +23,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pandas matplotlib || true
 
-      # 2) Horodatage (UTC)
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
-      # 3) Dossiers
       - name: Prepare folders
         run: |
           set -euo pipefail
           DATE="${{ steps.date.outputs.date }}"
           mkdir -p "data/${DATE}" "reports/${DATE}" reports/latest .tmp
 
-      # 4) Valeurs sûres (placeholder auto-discovery)
-      - name: Define endpoints env (auto-discovery safe defaults)
+      - name: Define endpoints env (placeholder)
         run: |
           set -euo pipefail
-          printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
+          printf "036a_dummyA\n047b_dummyB\n" > .tmp/visors_pks.txt
 
-      # 5) Capture: reuse si présent, sinon script, sinon mini-fallback
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -82,8 +76,7 @@ PY
             python .tmp/fallback_vitals.py
           fi
 
-      # 6) Sanitize + MD + Transform -> Sigma
-      - name: Sanitize + Report + Transform → Sigma
+      - name: Sanitize + report + transform to sigma
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
@@ -99,14 +92,13 @@ PY
             --md "$OUT_MD" \
             --sigma "$OUT_SIG"
 
-      # 7) Artifacts
-      - name: Upload SANITIZED JSON (artifact)
+      - name: Upload sanitized json
         uses: actions/upload-artifact@v4
         with:
           name: sigma_sanitized_${{ steps.date.outputs.date }}
           path: reports/${{ steps.date.outputs.date }}/skywire_vitals_sanitized.json
 
-      - name: Upload Integration Reports (artifact)
+      - name: Upload integration reports
         uses: actions/upload-artifact@v4
         with:
           name: sigma_reports_${{ steps.date.outputs.date }}
@@ -114,8 +106,7 @@ PY
             reports/${{ steps.date.outputs.date }}/skywire_vital_report.md
             reports/${{ steps.date.outputs.date }}/skywire_sigma_analysis.json
 
-      # 8) Commit & push (pas de rebase)
-      - name: Commit & push reports
+      - name: Commit and push reports
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
