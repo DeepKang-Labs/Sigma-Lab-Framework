@@ -76,10 +76,10 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 1392,
-        "vpn": 823,
-        "transports": 2610,
-        "dmsg_entries": 3055,
+        "proxies": 1409,
+        "vpn": 834,
+        "transports": 2594,
+        "dmsg_entries": 3059,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
@@ -152,14 +152,14 @@
               }
             },
             {
-              "address": "0350c4f9522dfcc0a53e0fdd28da1a0941904d522b85855e088f569477036fce86:44",
+              "address": "0208cbf61175699bd22367ab1104105c2d432117d896394cbe522fa5fb2bf3ae7f:44",
               "type": "vpn",
               "version": "v1.3.31",
               "geo": {
-                "lat": -6.22,
-                "lon": 106.84,
-                "country": "ID",
-                "region": "JK"
+                "lat": 1.37,
+                "lon": 103.8,
+                "country": "SG",
+                "region": null
               }
             },
             {
@@ -174,17 +174,6 @@
               }
             },
             {
-              "address": "03e1b2c357642ec540a08af636ff3dd560177f969831f60bcffce26baa5c1e9e24:44",
-              "type": "vpn",
-              "version": "v1.3.31",
-              "geo": {
-                "lat": -6.18,
-                "lon": 106.83,
-                "country": "ID",
-                "region": null
-              }
-            },
-            {
               "address": "02fc99fd5db4b1b095f7b39691944df4eade14927f3e7add42d4b473021c94d2bd:44",
               "type": "vpn",
               "version": "v1.3.31",
@@ -193,6 +182,17 @@
                 "lon": 6.26,
                 "country": "NL",
                 "region": "GE"
+              }
+            },
+            {
+              "address": "021a0cbdfde2c19c5f27f8ce964e35990e71eb1a69459251cf9b4fce016102756d:44",
+              "type": "vpn",
+              "version": "v1.3.30",
+              "geo": {
+                "lat": -2.91,
+                "lon": 104.75,
+                "country": "ID",
+                "region": "SS"
               }
             }
           ],
