@@ -36,12 +36,11 @@ jobs:
         run: |
           set -euo pipefail
           DATE="${{ steps.date.outputs.date }}"
-          mkdir -p "data/${DATE}" "reports/${DATE}" reports/latest artifacts/raw artifacts/sanitized
+          mkdir -p "data/${DATE}" "reports/${DATE}" reports/latest artifacts/raw artifacts/sanitized .tmp
 
       - name: Safe defaults for discovery
         run: |
           set -euo pipefail
-          mkdir -p .tmp
           printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
       - name: Run VitalSigns (produce JSON)
@@ -51,16 +50,17 @@ jobs:
           set -euo pipefail
           OUT_JSON="data/${DATE}/skywire_vitals.json"
           OUT_MD="data/${DATE}/skywire_summary.md"
+
           if [ -f scripts/skywire_vitals.py ]; then
             echo "✅ Using scripts/skywire_vitals.py"
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "⚠️  Fallback VitalSigns (inline)"
-            python - <<'PY'
+            echo "⚠️  Fallback VitalSigns (temp file mode)"
+            cat > .tmp/fallback_vitals.py <<'PY'
 import os, json, datetime, pathlib
 d = os.environ.get('DATE','unknown')
 out_json = f"data/{d}/skywire_vitals.json"
-out_md = f"data/{d}/skywire_summary.md"
+out_md   = f"data/{d}/skywire_summary.md"
 payload = {
   "date_utc": d,
   "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},
@@ -74,6 +74,7 @@ with open(out_md,"w",encoding="utf-8") as f:
   f.write("# Skywire VitalSigns (fallback)\n\n")
   f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
 PY
+            python .tmp/fallback_vitals.py
           fi
 
       - name: Upload RAW JSON (artifact)
@@ -93,6 +94,8 @@ PY
           OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
           OUT_SIG="reports/${DATE}/skywire_sigma_analysis.json"
+
+          # bridge.py doit exister au repo
           python scripts/bridge.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD" --sigma "$OUT_SIG"
 
       - name: Upload SANITIZED JSON (artifact)
@@ -117,13 +120,19 @@ PY
           set -euo pipefail
           git config user.name "sigma-bot"
           git config user.email "sigma-bot@users.noreply.github.com"
+
+          # sync before commit (handles prior pushes)
           git pull --rebase --autostash || true
+
           git add -A
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
+
           DATE="${{ steps.date.outputs.date }}"
           git commit -m "report(skywire): vitals + integration — ${DATE}"
+
+          # rebase once more to avoid race, then push
           git pull --rebase --autostash || true
           git push origin HEAD:main
