@@ -1,0 +1,10 @@
+{
+  "date": "2025-10-30",
+  "scores": {
+    "non_harm": 1.0,
+    "stability": 1,
+    "resilience": 1,
+    "equity": 0.5
+  },
+  "verdict": "OK"
+}
