@@ -1,254 +1,142 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Bridge Skywire → Sigma
-- Lit un skywire_vitals.json brut
-- Sanitize (retrait champs sensibles éventuels)
-- Produit un mini rapport Markdown
-- Transforme vers un payload Sigma enrichi (metrics réseau + supply)
-- Écrit les sorties dans les chemins fournis
+Bridge: VitalSigns JSON  →  (sanitized JSON, quick MD)  +  Sigma transform JSON
 
-Usage (exemple) :
-  python scripts/bridge.py \
-      --in data/2025-10-30/skywire_vitals.json \
-      --out reports/2025-10-30/skywire_vitals_sanitized.json \
-      --md  reports/2025-10-30/skywire_vital_report.md \
-      --sigma reports/2025-10-30/skywire_sigma_analysis.json
+Usage:
+  python scripts/bridge.py --in data/2025-10-30/skywire_vitals.json \
+                           --out reports/2025-10-30/skywire_vitals_sanitized.json \
+                           --md  reports/2025-10-30/skywire_vital_report.md \
+                           --sigma reports/2025-10-30/skywire_sigma_analysis.json
 """
-
 from __future__ import annotations
-import argparse
-import json
-import os
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+import argparse, json, os, statistics, datetime, pathlib, sys
+from typing import Any, Dict, List
 
-
-# ----------------------------
-# Helpers
-# ----------------------------
-
-SUSPECT_KEYS = {"ip", "public_key", "debug"}  # clés potentiellement sensibles au top-level
-
-
-def to_float(x: Any, default: float = 0.0) -> float:
-    try:
-        if x is None:
-            return default
-        if isinstance(x, (int, float)):
-            return float(x)
-        s = str(x).strip()
-        if s == "":
-            return default
-        return float(s)
-    except Exception:
-        return default
-
-
-def ensure_parent(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-
-def load_json(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
+def read_json(p: str) -> Dict[str, Any]:
+    with open(p, "r", encoding="utf-8") as f:
         return json.load(f)
 
-
-def write_json(path: Path, obj: Any) -> None:
-    ensure_parent(path)
-    with path.open("w", encoding="utf-8") as f:
+def write_json(obj: Any, p: str) -> None:
+    pathlib.Path(os.path.dirname(p)).mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
+def write_text(txt: str, p: str) -> None:
+    pathlib.Path(os.path.dirname(p)).mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(txt)
 
-def write_text(path: Path, text: str) -> None:
-    ensure_parent(path)
-    with path.open("w", encoding="utf-8") as f:
-        f.write(text)
+SENSITIVE_TOPLEVEL = {"ip", "public_key", "debug", "signature"}
 
+def sanitize_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop known sensitive keys; keep structure stable."""
+    clean = json.loads(json.dumps(doc))  # deep copy
+    for k in list(clean.keys()):
+        if k in SENSITIVE_TOPLEVEL:
+            clean.pop(k, None)
+    # prune sensitive keys inside groups/payloads if any appear
+    for g in clean.get("groups", []) or []:
+        for pl in g.get("payloads", []) or []:
+            for k in list(pl.keys()):
+                if k in SENSITIVE_TOPLEVEL:
+                    pl.pop(k, None)
+    return clean
 
-# ----------------------------
-# Sanitize & Quick report
-# ----------------------------
+def metrics_from(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract simple, robust metrics from VitalSigns shape."""
+    success_flags: List[bool] = []
+    latencies: List[float] = []
 
-def sanitize_top_level(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Retire quelques clés sensibles (si présentes) au niveau racine uniquement."""
-    out = dict(data)
-    for k in list(out.keys()):
-        if k in SUSPECT_KEYS:
-            out.pop(k, None)
-    return out
+    for g in (doc.get("groups") or []):
+        for pl in (g.get("payloads") or []):
+            ok = pl.get("__ok__")
+            if isinstance(ok, bool):
+                success_flags.append(ok)
+            # allow 'latency_ms' or 'latency' numeric
+            lat = pl.get("latency_ms", pl.get("latency"))
+            if isinstance(lat, (int, float)):
+                latencies.append(float(lat))
 
+    succ_ratio = (sum(1 for x in success_flags if x) / len(success_flags) * 100.0) if success_flags else None
+    lat_avg = statistics.fmean(latencies) if latencies else None
 
-@dataclass
-class QuickCounts:
-    groups: int
-    endpoints_total: int
-    payloads_total: int
-    ok: int
-    failed: int
-
-
-def quick_counts_from_data(data: Dict[str, Any]) -> QuickCounts:
-    groups = data.get("groups", []) or []
-    endpoints_total = 0
-    payloads_total = 0
-    ok = 0
-    failed = 0
-
-    for g in groups:
-        endpoints = g.get("endpoints", []) or []
-        payloads = g.get("payloads", []) or []
-        endpoints_total += len(endpoints)
-        payloads_total += len(payloads)
-        for p in payloads:
-            if bool(p.get("_ok_")) and p.get("_status_") == 200:
-                ok += 1
-            else:
-                failed += 1
-
-    return QuickCounts(
-        groups=len(groups),
-        endpoints_total=endpoints_total,
-        payloads_total=payloads_total,
-        ok=ok,
-        failed=failed,
-    )
-
-
-def infer_date_utc(data: Dict[str, Any]) -> str:
-    return data.get("date_utc") or datetime.utcnow().isoformat() + "Z"
-
-
-def render_markdown_report(date_utc: str, counts: QuickCounts, notes: Optional[str] = None) -> str:
-    availability = 0.0
-    if counts.payloads_total:
-        availability = round(100.0 * counts.ok / counts.payloads_total, 2)
-
-    lines = [
-        f"# Skywire Vital Report ({date_utc})",
-        "",
-        f"- **Groups**: {counts.groups}",
-        f"- **Endpoints (total)**: {counts.endpoints_total}",
-        f"- **Payloads**: {counts.payloads_total} — ✅ {counts.ok} / ❌ {counts.failed}",
-        f"- **Availability**: {availability} %",
-    ]
-    if notes:
-        lines += ["", f"> {notes}"]
-    lines += ["", "_Auto-generated by bridge.py_"]
-    return "\n".join(lines)
-
-
-# ----------------------------
-# Transform → Sigma
-# ----------------------------
-
-def transform_to_sigma(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Convertit les données brutes skywire_vitals → format Sigma enrichi.
-    Extrait :
-      - current_supply / total_supply / coin_hours_total (si présents dans summary d’un groupe)
-      - métriques réseau (endpoints, payloads ok/failed, disponibilité)
-    """
-    sigma_payload: Dict[str, Any] = {}
-    metrics: Dict[str, Any] = {}
-
-    # 1) Informations de base
-    meta = data.get("meta", {}) or {}
-    sigma_payload["date_utc"] = infer_date_utc(data)
-    sigma_payload["meta"] = {
-        "source": meta.get("repo", "unknown"),
-        "agent": meta.get("agent", "unknown"),
+    summary = doc.get("summary") or {}
+    return {
+        "date_utc": doc.get("date_utc"),
+        "success_ratio_pct": round(succ_ratio, 2) if succ_ratio is not None else None,
+        "latency_avg_ms": round(lat_avg, 2) if lat_avg is not None else None,
+        "height": summary.get("height"),
+        "current_supply": summary.get("current_supply"),
+        "total_supply": summary.get("total_supply"),
+        "coin_hours": summary.get("coin_hours"),
+        "count_payloads": len(success_flags) if success_flags else 0,
     }
 
-    # 2) Agrégats réseau + extraction summary (s’il existe)
-    groups = data.get("groups", []) or []
-    total_endpoints = 0
-    total_payloads = 0
-    ok_payloads = 0
-    failed_payloads = 0
+def md_report(metrics: Dict[str, Any]) -> str:
+    d = metrics
+    def fmt(x, suffix=""):
+        return f"{x}{suffix}" if x is not None else "-"
 
-    for g in groups:
-        endpoints = g.get("endpoints", []) or []
-        payloads = g.get("payloads", []) or []
-        total_endpoints += len(endpoints)
-        total_payloads += len(payloads)
-        for p in payloads:
-            if bool(p.get("_ok_")) and p.get("_status_") == 200:
-                ok_payloads += 1
-            else:
-                failed_payloads += 1
-        # Summary blockchain (ex: groupe "explorer")
-        if isinstance(g.get("summary"), dict):
-            summary = g["summary"]
-            metrics["current_supply"] = to_float(summary.get("current_supply"))
-            metrics["total_supply"] = to_float(summary.get("total_supply"))
-            metrics["coin_hours_total"] = to_float(summary.get("coin_hours"))
+    lines = [
+        "# Skywire Vital Report",
+        "",
+        f"Last measurement: {d.get('date_utc') or datetime.date.today().isoformat()}",
+        "",
+        "## Daily Summary",
+        f"* Success ratio : {fmt(d.get('success_ratio_pct'), ' %')}",
+        f"* Latency avg   : {fmt(d.get('latency_avg_ms'), ' ms')}",
+        f"* Nodes active (est.) : -",
+        f"* Proxy activity (tx) : -",
+        "",
+        "> Auto-generated by Sigma – Skywire Vital Report.",
+        ""
+    ]
+    return "\n".join(lines)
 
-    metrics["groups_detected"] = len(groups)
-    metrics["endpoints_total"] = total_endpoints
-    metrics["payloads_total"] = total_payloads
-    metrics["payloads_ok"] = ok_payloads
-    metrics["payloads_failed"] = failed_payloads
-    metrics["availability_ratio_%"] = (
-        round(100.0 * ok_payloads / total_payloads, 2) if total_payloads else 0.0
-    )
+def sigma_transform(doc: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Produce a minimal, stable Sigma analysis JSON."""
+    return {
+        "date_utc": metrics.get("date_utc"),
+        "engine": "sigma-v1",
+        "inputs": {
+            "source": doc.get("meta", {}).get("source", "unknown"),
+            "payloads": metrics.get("count_payloads", 0),
+        },
+        "features": {
+            "success_ratio_pct": metrics.get("success_ratio_pct"),
+            "latency_avg_ms": metrics.get("latency_avg_ms"),
+            "supply": {
+                "height": metrics.get("height"),
+                "current": doc.get("summary", {}).get("current_supply"),
+                "total": doc.get("summary", {}).get("total_supply"),
+                "coin_hours": doc.get("summary", {}).get("coin_hours"),
+            },
+        },
+        "generated_utc": datetime.datetime.utcnow().isoformat() + "Z",
+    }
 
-    sigma_payload["metrics"] = metrics
-    sigma_payload["notes"] = "Bridge Skywire → Sigma : endpoints & supply aggregated."
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--in", dest="inp", required=True)
+    ap.add_argument("--out", dest="out_json", required=True)
+    ap.add_argument("--md", dest="out_md", required=True)
+    ap.add_argument("--sigma", dest="out_sigma", required=True)
+    args = ap.parse_args()
 
-    return sigma_payload
+    raw = read_json(args.inp)
+    clean = sanitize_payload(raw)
+    write_json(clean, args.out_json)
 
+    m = metrics_from(clean)
+    write_text(md_report(m), args.out_md)
 
-# ----------------------------
-# Main pipeline
-# ----------------------------
-
-def run_bridge(in_path: Path, out_sanitized: Path, out_md: Path, out_sigma: Path) -> None:
-    # 1) Charge
-    raw = load_json(in_path)
-
-    # 2) Sanitize (léger)
-    sanitized = sanitize_top_level(raw)
-
-    # 3) Quick report
-    counts = quick_counts_from_data(sanitized)
-    date_utc = infer_date_utc(sanitized)
-    md = render_markdown_report(date_utc, counts)
-
-    # 4) Transform → Sigma
-    sigma = transform_to_sigma(sanitized)
-
-    # 5) Écrit les sorties
-    write_json(out_sanitized, sanitized)
-    write_text(out_md, md)
-    write_json(out_sigma, sigma)
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Bridge Skywire → Sigma")
-    parser.add_argument("--in", dest="in_path", required=True, help="Chemin du skywire_vitals.json brut")
-    parser.add_argument("--out", dest="out_json", required=True, help="Chemin du JSON sanitizé")
-    parser.add_argument("--md", dest="out_md", required=True, help="Chemin du rapport Markdown")
-    parser.add_argument("--sigma", dest="out_sigma", required=True, help="Chemin du JSON Sigma")
-    return parser.parse_args()
-
-
-def main() -> None:
-    args = parse_args()
-    in_path = Path(args.in_path)
-    out_sanitized = Path(args.out_json)
-    out_md = Path(args.out_md)
-    out_sigma = Path(args.out_sigma)
-
-    if not in_path.exists():
-        raise FileNotFoundError(f"Input not found: {in_path}")
-
-    run_bridge(in_path, out_sanitized, out_md, out_sigma)
-    # Log minimal en sortie CI
-    print(f"[bridge] OK →\n  sanitized: {out_sanitized}\n  report:    {out_md}\n  sigma:     {out_sigma}")
-
+    sig = sigma_transform(clean, m)
+    write_json(sig, args.out_sigma)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"[bridge] error: {e}", file=sys.stderr)
+        sys.exit(1)
