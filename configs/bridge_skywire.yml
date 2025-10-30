@@ -1,0 +1,6 @@
+# configs/bridge_skywire.yml
+network: skywire
+data_root: data
+sigma_url: http://localhost:8000
+inbox_endpoint: /api/mesh/inbox
+timeout_seconds: 20
