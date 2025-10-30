@@ -35,16 +35,16 @@ jobs:
       - name: Prepare folders
         run: |
           DATE="${{ steps.date.outputs.date }}"
-          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest" ".tmp"
+          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest"
           mkdir -p artifacts/raw artifacts/sanitized
 
       - name: Safe defaults for discovery
         run: |
-          printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
+          printf "036a...dummyA\n047b...dummyB\n" > .tmp_visors_pks.txt
 
-      # -------------------------------
-      #  Run VitalSigns
-      # -------------------------------
+      # ------------------------------------------------
+      # 5) Run VitalSigns (JSON + quick MD)
+      # ------------------------------------------------
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -57,32 +57,29 @@ jobs:
             echo "✅ Using scripts/skywire_vitals.py"
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "⚠️ Fallback VitalSigns (inline mode)"
-            mkdir -p .tmp
-            cat <<'PY' > .tmp/fallback_vitals.py
+            echo "⚠️ Fallback VitalSigns (inline)"
+            python - <<'PY'
 import os, json, datetime, pathlib
-
-date = os.environ.get("DATE", "unknown")
+date = os.environ.get("DATE","unknown")
 out_json = f"data/{date}/skywire_vitals.json"
 out_md   = f"data/{date}/skywire_summary.md"
 
 payload = {
-    "date_utc": date,
-    "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
-    "groups": ["explorer", "public"],
-    "payloads": [{"visor": "demo", "ok": True, "latency_ms": 42.0}],
+  "date_utc": date,
+  "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
+  "groups": ["explorer","public"],
+  "payloads": [{"visor":"demo","ok":True,"latency_ms":42.0}],
 }
 
 pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-with open(out_json, "w", encoding="utf-8") as f:
-    json.dump(payload, f, ensure_ascii=False, indent=2)
+with open(out_json,"w",encoding="utf-8") as f:
+  json.dump(payload,f,ensure_ascii=False,indent=2)
 
-with open(out_md, "w", encoding="utf-8") as f:
-    f.write(f"# Skywire VitalSigns (fallback) — {date}\n\n")
-    f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
-    f.write(f"- items: {len(payload.get('payloads', []))}\n")
+with open(out_md,"w",encoding="utf-8") as f:
+  f.write(f"# Skywire VitalSigns (fallback) — {date}\n\n")
+  f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
+  f.write(f"- items: {len(payload.get('payloads',[]))}\n")
 PY
-            python .tmp/fallback_vitals.py
           fi
 
       - name: Upload RAW JSON (artifact)
@@ -90,11 +87,12 @@ PY
         with:
           name: skywire_raw_${{ steps.date.outputs.date }}
           path: data/${{ steps.date.outputs.date }}/skywire_vitals.json
+          if-no-files-found: error
           retention-days: 7
 
-      # -------------------------------
-      #  Sanitize + quick report
-      # -------------------------------
+      # ------------------------------------------------
+      # 6) Sanitize + quick report
+      # ------------------------------------------------
       - name: Sanitize JSON (private → public-safe) + generate quick report
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -109,41 +107,42 @@ PY
             python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD"
           else
             echo "⚠️ Using fallback reporter (no pandas)"
-            cat <<'PY' > .tmp/fallback_sanitize.py
+            python - <<'PY'
 import json, os, datetime, pathlib
+date = os.environ.get("DATE","unknown")
+inp  = f"data/{date}/skywire_vitals.json"
+outj = f"reports/{date}/skywire_vitals_sanitized.json"
+outm = f"reports/{date}/skywire_vital_report.md"
 
-date = os.environ.get("DATE", "unknown")
-inp = f"data/{date}/skywire_vitals.json"
-out_j = f"reports/{date}/skywire_vitals_sanitized.json"
-out_m = f"reports/{date}/skywire_vital_report.md"
+pathlib.Path(os.path.dirname(outj)).mkdir(parents=True, exist_ok=True)
+with open(inp,"r",encoding="utf-8") as f:
+  data = json.load(f)
 
-pathlib.Path(os.path.dirname(out_j)).mkdir(parents=True, exist_ok=True)
-with open(inp, "r", encoding="utf-8") as f:
-    data = json.load(f)
-for k in ("ip", "public_key", "debug"):
-    if isinstance(data, dict):
-        data.pop(k, None)
-with open(out_j, "w", encoding="utf-8") as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
+# drop potentially sensitive keys
+for k in ("ip","public_key","debug"):
+  if isinstance(data,dict):
+    data.pop(k, None)
+
+with open(outj,"w",encoding="utf-8") as f:
+  json.dump(data,f,ensure_ascii=False,indent=2)
 
 md = [
-    f"# Skywire Vital Report ({date})",
-    "",
-    f"- Generated: {datetime.datetime.utcnow().isoformat()}Z",
-    "",
-    f"- Fields: {len(data) if hasattr(data, '__len__') else 'n/a'}",
-    "",
-    "This is an auto-generated minimal report.",
+  f"# Skywire Vital Report ({date})",
+  "",
+  f"- Generated: {datetime.datetime.utcnow().isoformat()}Z",
+  "",
+  f"- Fields: {len(data) if hasattr(data,'__len__') else 'n/a'}",
+  "",
+  "This is an auto-generated minimal report."
 ]
-with open(out_m, "w", encoding="utf-8") as f:
-    f.write("\n".join(md))
+with open(outm,"w",encoding="utf-8") as f:
+  f.write("\n".join(md))
 PY
-            python .tmp/fallback_sanitize.py
           fi
 
-      # -------------------------------
-      #  Commit & push (safe rebase)
-      # -------------------------------
+      # ------------------------------------------------
+      # 7) Commit & push (safe against fast-forward)
+      # ------------------------------------------------
       - name: Commit & push reports (safe)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -152,7 +151,8 @@ PY
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+          # tente rebase d'abord, sinon merge protégé
           git rebase origin/main || git merge --strategy-option ours origin/main
           git add reports/
-          git commit -m "report(skywire): vitals + sanitized — ${DATE}" || echo "No changes"
+          git commit -m "report(skywire): vitals + sanitized — ${DATE}" || echo "No changes to commit"
           git push origin HEAD:main
