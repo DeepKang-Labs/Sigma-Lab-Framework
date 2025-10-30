@@ -1,50 +1,63 @@
-name: Skywire / VitalSigns + Sigma Integration
+name: Skywire/VitalSigns v5.2 (capture → sanitize → integrate)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
   schedule:
-    - cron: "17 0 * * *"
+    - cron: "7 0 * * *"   # tous les jours ~00:07 UTC
 
 permissions:
   contents: write
   actions: read
 
+concurrency:
+  group: skywire-vitals
+  cancel-in-progress: false
+
 jobs:
   vitals:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
+      # 1) Checkout (full, pour commit des rapports)
       - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 2) Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: '3.11'
 
+      # 3) Deps minimes (léger)
       - name: Install minimal deps
         run: |
           python -m pip install --upgrade pip
           pip install requests pyyaml
 
+      # 4) Date (UTC)
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
+      # 5) Dossiers
       - name: Prepare folders
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest"
-          mkdir -p artifacts/raw artifacts/sanitized .tmp
+          mkdir -p "data/${DATE}" "reports/${DATE}" reports/latest .tmp
+          mkdir -p artifacts/raw artifacts/sanitized
 
+      # 6) Auto-discovery endpoints (placeholder sûr)
       - name: Define endpoints env (auto-discovery safe defaults)
         run: |
           set -euo pipefail
           [ -f .tmp/visors_pks.txt ] || printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
+      # 7) Run VitalSigns (JSON + mini résumé)
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -52,13 +65,36 @@ jobs:
           set -euo pipefail
           OUT_JSON="data/${DATE}/skywire_vitals.json"
           OUT_MD="data/${DATE}/skywire_summary.md"
+
           if [ -f scripts/skywire_vitals.py ]; then
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            python scripts/fallback_vitals.py
+            # Fallback inline (simple payload)
+            python - <<'PY'
+import os, json, datetime, pathlib
+date = os.environ.get("DATE","unknown")
+out_json = f"data/{date}/skywire_vitals.json"
+out_md   = f"data/{date}/skywire_summary.md"
+payload = {
+  "date_utc": date,
+  "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},
+  "groups": ["explorer","public"],
+  "payloads": [{"visor":"demo","ok": True,"latency_ms": 42.0}],
+}
+pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
+with open(out_json,"w",encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+with open(out_md,"w",encoding="utf-8") as f:
+    f.write(f"# Skywire VitalSigns (fallback) — {date}\n\n")
+    f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
+    f.write(f"- items: {len(payload.get('payloads',[]))}\n")
+PY
           fi
+
+          # snapshot brut → artefacts
           cp "data/${DATE}/skywire_vitals.json" "artifacts/raw/skywire_vitals_${DATE}.json"
 
+      # 8) Upload RAW
       - name: Upload RAW JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -67,6 +103,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # 9) Sanitize + quick report (léger, fallback si pas de pandas)
       - name: Sanitize JSON (private → public-safe) + generate quick report
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -75,15 +112,26 @@ jobs:
           IN="data/${DATE}/skywire_vitals.json"
           OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
-          if [ -f scripts/skywire_vital_report.py ]; then
+
+          if [ -f scripts/skywire_vital_report.py ] && python - <<'PY' 2>/dev/null
+import importlib, sys
+sys.exit(0 if importlib.util.find_spec("pandas") else 1)
+PY
+          then
+            echo "→ Using official reporter (pandas detected)"
             python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD"
           else
+            echo "→ Using lightweight fallback reporter (no pandas)"
             python scripts/fallback_sanitize.py
           fi
+
+          # Pointeurs "latest"
+          mkdir -p reports/latest
           cp "$OUT_SAN" "artifacts/sanitized/skywire_vitals_${DATE}_sanitized.json"
           cp "$OUT_MD"  "reports/latest/skywire_vital_report.md"
           cp "$OUT_SAN" "reports/latest/skywire_vitals_sanitized.json"
 
+      # 10) Upload SANITIZED
       - name: Upload SANITIZED JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -94,39 +142,57 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # 11) Rendre le moteur importable (PYTHONPATH)
       - name: Make engine importable (package + PYTHONPATH)
-        run: echo "PYTHONPATH=$PWD" >> "$GITHUB_ENV"
+        run: |
+          set -euo pipefail
+          [ -f engine/__init__.py ] || echo '# pkg' > engine/__init__.py
+          export PYTHONPATH="$PWD"
+          python -c "import engine; print('engine OK')"
 
+      # 12) Intégration Skywire → Sigma (+ rapports)
       - name: Run Integration (Skywire → Sigma) + reports
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          python scripts/fallback_sigma_integration.py
-          cp "reports/${DATE}/skywire_sigma_analysis.json" "reports/latest/skywire_sigma_analysis.json"
-          cp "reports/${DATE}/skywire_sigma_summary.md"   "reports/latest/skywire_sigma_summary.md"
+          export PYTHONPATH="$PWD"
+          python network_bridge/run_network_integrated.py \
+            --network skywire \
+            --discovery "data/${DATE}" \
+            --out ".tmp/analysis_${DATE}.json"
 
+          python scripts/generate_analysis_report.py \
+            --input ".tmp/analysis_${DATE}.json" \
+            --out "reports/${DATE}/skywire_sigma_analysis_${DATE}.md"
+
+          cp ".tmp/analysis_${DATE}.json" "reports/latest/analysis.json"
+          cp "reports/${DATE}/skywire_sigma_analysis_${DATE}.md" "reports/latest/skywire_sigma_analysis.md"
+
+      # 13) Upload rapports d’intégration
       - name: Upload Integration Reports (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: skywire_sigma_integration_${{ steps.date.outputs.date }}
+          name: sigma_integration_${{ steps.date.outputs.date }}
           path: |
             reports/${{ steps.date.outputs.date }}/*
             reports/latest/*
           if-no-files-found: error
           retention-days: 7
 
+      # 14) Commit & push des rapports
       - name: Commit & push reports
-        if: ${{ github.ref == 'refs/heads/main' }}
         env:
           DATE: ${{ steps.date.outputs.date }}
+          GIT_AUTHOR_NAME: Sigma Bot
+          GIT_AUTHOR_EMAIL: bot@sigma.local
+          GIT_COMMITTER_NAME: Sigma Bot
+          GIT_COMMITTER_EMAIL: bot@sigma.local
         run: |
           set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "reports/${DATE}" "reports/latest" || true
+          git add reports/${DATE} reports/latest
           if ! git diff --cached --quiet; then
-            git commit -m "chore(reports): Skywire + Sigma for ${DATE}"
+            git commit -m "chore(report): Skywire → Sigma integration for ${DATE}"
             git push
           else
             echo "No report changes to commit."
