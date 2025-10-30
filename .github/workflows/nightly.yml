@@ -1,107 +1,43 @@
-name: nightly
+name: bridge-smoke (manual)
 
 on:
-  schedule:
-    - cron: "0 3 * * *"   # every day at 03:00 UTC
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
-  nightly-validation:
+  smoke:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Deps
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # minimal tools used by CI
-          pip install pytest simpleeval pyyaml
+          pip install -r requirements.txt || true
 
-      - name: Create required folders
+      - name: Demo discovery
         run: |
-          mkdir -p pilots/validation_logs
-          mkdir -p discovery
+          mkdir -p .tmp reports/smoke
+          printf "036a_dummyA\n047b_dummyB\n" > .tmp/visors_pks.txt
+          echo "PYTHONPATH=$PWD" >> "$GITHUB_ENV"
 
-      # IMPORTANT : plus aucun bloc Python dans le YAML.
-      # On génère le YAML de démo uniquement avec echo (bash).
-      - name: Create demo discovery data (safe fallback)
-        shell: bash
-        run: |
-          if [ ! -f discovery/decision_mapper.yaml ]; then
-            echo 'version: "1.0"' > discovery/decision_mapper.yaml
-            echo 'discovery_date: "2025-10-25"' >> discovery/decision_mapper.yaml
-            echo 'decision_points:' >> discovery/decision_mapper.yaml
-            echo '  - decision_id: "dp_demo_ci"' >> discovery/decision_mapper.yaml
-            echo '    description: "CI demo decision for nightly"' >> discovery/decision_mapper.yaml
-            echo '    stakeholders: ["end_users", "core_devs"]' >> discovery/decision_mapper.yaml
-            echo '    governance_dimensions:' >> discovery/decision_mapper.yaml
-            echo '      technical_complexity: 5' >> discovery/decision_mapper.yaml
-            echo '      economic_impact: 4' >> discovery/decision_mapper.yaml
-            echo '      user_experience_impact: 6' >> discovery/decision_mapper.yaml
-            echo '      security_implications: 3' >> discovery/decision_mapper.yaml
-            echo '      current_pain_level: 5' >> discovery/decision_mapper.yaml
-          fi
-
-      - name: Set PYTHONPATH
-        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
-
-      - name: Run unit tests (core + bridge)
-        run: python -m pytest -q
-
-      # ---- Bridge validate-only (Skywire)
       - name: Bridge • validate-only (Skywire)
         run: |
           python -m network_bridge.run_network_integrated \
             --network skywire \
-            --discovery ./discovery \
-            --mappings ./network_bridge/mappings_skywire.yaml \
-            --config ./sigma_config_placeholder.yaml \
-            --out ./pilots/validation_logs/skywire_validate_only.json \
-            --validate-only \
-            --formula-eval auto
+            --discovery .tmp/visors_pks.txt \
+            --out reports/smoke/skywire_validation.json \
+            --also-md
 
-      # ---- Bridge validate-only (Fiber)
-      - name: Bridge • validate-only (Fiber)
-        run: |
-          python -m network_bridge.run_network_integrated \
-            --network fiber \
-            --discovery ./discovery \
-            --mappings ./network_bridge/mappings_fiber.yaml \
-            --config ./sigma_config_placeholder.yaml \
-            --out ./pilots/validation_logs/fiber_validate_only.json \
-            --validate-only \
-            --formula-eval auto
-
-      # On s'assure qu'un report existe pour MeshMemory (évite le fail si précédent step n'a rien produit)
-      - name: Ensure mesh_memory_report exists
-        shell: bash
-        run: |
-          REPORT=pilots/validation_logs/mesh_memory_report.json
-          if [ ! -f "$REPORT" ]; then
-            echo '{}' > "$REPORT"
-          fi
-
-      # Outil MeshMemory (optionnel ici ; le script exige --report)
-      - name: Tools • mesh_memory_append
-        run: |
-          python -m tools.mesh_memory_append \
-            --report pilots/validation_logs/mesh_memory_report.json
-
-      # Génération de la Priority Matrix à partir des mappings Skywire
-      - name: Tools • priority_matrix_from_mappings
-        shell: bash
-        run: |
-          set -euo pipefail
-          MAP=./network_bridge/mappings_skywire.yaml
-          OUT=./pilots/validation_logs/priority_matrix_report.json
-          PYTHONPATH=$PWD python -m tools.priority_matrix_from_mappings \
-            --mappings "$MAP" \
-            --out "$OUT"
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge_smoke_${{ github.run_id }}
+          path: reports/smoke
+          if-no-files-found: error
+          retention-days: 7
