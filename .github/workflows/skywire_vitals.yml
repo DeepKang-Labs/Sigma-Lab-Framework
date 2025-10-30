@@ -3,76 +3,54 @@ name: Skywire / VitalSigns + Sigma Integration
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "17 0 * * *"   # tous les jours ~00:17 UTC (évite l'embouteillage Actions)
+    - cron: "17 0 * * *"  # quotidien ~00:17 UTC
 
 permissions:
-  contents: write   # pour committer les rapports
+  contents: write
   actions: read
 
 jobs:
   vitals:
     runs-on: ubuntu-latest
-
     steps:
-      # --------------------------------------------------
       # 0) Checkout
-      # --------------------------------------------------
       - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # --------------------------------------------------
-      # 1) Python + deps
-      # --------------------------------------------------
+      # 1) Python + deps de base
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Install minimal deps
         run: |
           python -m pip install --upgrade pip
           pip install requests pyyaml
 
-      # --------------------------------------------------
-      # 2) Date stamp (UTC) → steps.date.outputs.date
-      # --------------------------------------------------
+      # 2) Date UTC → steps.date.outputs.date
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      # --------------------------------------------------
-      # 3) Préparer dossiers
-      # --------------------------------------------------
+      # 3) Dossiers
       - name: Prepare folders
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          mkdir -p "data/${DATE}"
-          mkdir -p "reports/${DATE}"
-          mkdir -p "reports/latest"
-          mkdir -p artifacts/raw
-          mkdir -p artifacts/sanitized
+          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest"
+          mkdir -p artifacts/raw artifacts/sanitized .tmp
 
-      # --------------------------------------------------
-      # 4) (Optionnel) auto-discovery endpoints
-      #    Écrit .tmp/visors_pks.txt si absent
-      # --------------------------------------------------
+      # 4) Auto-discovery endpoints (placeholder sûr)
       - name: Define endpoints env (auto-discovery safe defaults)
         run: |
           set -euo pipefail
-          mkdir -p .tmp
-          if [ ! -f .tmp/visors_pks.txt ]; then
-            printf "036a...dummykeyA\n047b...dummykeyB\n" > .tmp/visors_pks.txt
-          fi
+          [ -f .tmp/visors_pks.txt ] || printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # --------------------------------------------------
-      # 5) Run VitalSigns (produit JSON + mini résumé MD)
-      #    Utilise scripts/skywire_vitals.py si présent.
-      #    Sinon fallback inline (heredoc correctement quoté).
-      # --------------------------------------------------
+      # 5) Run VitalSigns (JSON + mini résumé)
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -84,26 +62,29 @@ jobs:
           if [ -f scripts/skywire_vitals.py ]; then
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            python - <<'PY'
-import os, json, datetime
+            cat > .tmp/fallback_vitals.py <<'PY'
+import os, json, datetime, pathlib
 date = os.environ.get("DATE","unknown")
 out_json = f"data/{date}/skywire_vitals.json"
 out_md   = f"data/{date}/skywire_summary.md"
 payload = {
-  "date_utc": date,
-  "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
-  "groups": ["explorer", "public"],
-  "payloads": [{"visor":"demo","ok": True, "latency_ms": 42.0}]
+    "date_utc": date,
+    "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
+    "groups": ["explorer", "public"],
+    "payloads": [{"visor": "demo", "ok": True, "latency_ms": 42.0}],
 }
-os.makedirs(os.path.dirname(out_json), exist_ok=True)
+pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
 with open(out_json,"w",encoding="utf-8") as f:
-  json.dump(payload,f,ensure_ascii=False,indent=2)
+    json.dump(payload, f, ensure_ascii=False, indent=2)
 with open(out_md,"w",encoding="utf-8") as f:
-  f.write(f"# Skywire VitalSigns (fallback) — {date}\n\n- generated: {datetime.datetime.utcnow().isoformat()}Z\n- items: {len(payload.get('payloads',[]))}\n")
+    f.write(f"# Skywire VitalSigns (fallback) — {date}\n\n")
+    f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
+    f.write(f"- items: {len(payload.get('payloads',[]))}\n")
 PY
+            python .tmp/fallback_vitals.py
           fi
 
-          # snapshot brut → artefacts/raw
+          # snapshot brut → artefacts
           cp "data/${DATE}/skywire_vitals.json" "artifacts/raw/skywire_vitals_${DATE}.json"
 
       - name: Upload RAW JSON (artifact)
@@ -114,9 +95,7 @@ PY
           if-no-files-found: error
           retention-days: 7
 
-      # --------------------------------------------------
-      # 6) Sanitize + quick report (CORRIGÉ : heredoc <<'PY')
-      # --------------------------------------------------
+      # 6) Sanitize + quick report (fallback solide sans heredoc inline)
       - name: Sanitize JSON (private → public-safe) + generate quick report
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -127,10 +106,8 @@ PY
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
 
           if [ -f scripts/skywire_vital_report.py ]; then
-            # Preferred reporter si disponible
             python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD"
           else
-            # Fallback robuste via script temporaire (YAML-safe)
             cat > .tmp/fallback_sanitize.py <<'PY'
 import os, json, datetime, pathlib
 date = os.environ.get('DATE', 'unknown')
@@ -139,11 +116,10 @@ out_json = f"reports/{date}/skywire_vitals_sanitized.json"
 out_md = f"reports/{date}/skywire_vital_report.md"
 
 pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-
 with open(inp, "r", encoding="utf-8") as f:
     data = json.load(f)
 
-# Light sanitize: remove potentially sensitive top-level keys if any
+# Light sanitize (top-level only, si présent)
 if isinstance(data, dict):
     for k in ("ip", "public_key", "debug"):
         data.pop(k, None)
@@ -157,7 +133,7 @@ md = [
   f"- Generated: {datetime.datetime.utcnow().isoformat()}Z",
   f"- Fields: {len(data) if hasattr(data, '__len__') else 'n/a'}",
   "",
-  "This is an auto-generated minimal report."
+  "This is an auto-generated minimal report.",
 ]
 with open(out_md, "w", encoding="utf-8") as f:
     f.write("\n".join(md))
@@ -180,29 +156,18 @@ PY
           if-no-files-found: error
           retention-days: 7
 
-      # --------------------------------------------------
       # 7) Rendre le moteur importable (PYTHONPATH)
-      # --------------------------------------------------
       - name: Make engine importable (package + PYTHONPATH)
-        run: |
-          echo "PYTHONPATH=$PWD" >> "$GITHUB_ENV"
+        run: echo "PYTHONPATH=$PWD" >> "$GITHUB_ENV"
 
-      # --------------------------------------------------
-      # 8) Intégration Skywire → Sigma (avec fallback)
-      #    1) Tente engine.SigmaAnalyzer sur le JSON sanitisé
-      #    2) Sinon calcule des scores simples et écrit un verdict
-      # --------------------------------------------------
+      # 8) Intégration Skywire → Sigma (try engine, else fallback)
       - name: Run Integration (Skywire → Sigma) + reports
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          IN_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
-          OUT_ANALYSIS="reports/${DATE}/skywire_sigma_analysis.json"
-          OUT_SUMMARY="reports/${DATE}/skywire_sigma_summary.md"
-
-          python - <<'PY'
-import os, json, importlib, statistics, datetime, pathlib, sys
+          cat > .tmp/integration_sigma.py <<'PY'
+import os, json, importlib, statistics, datetime, pathlib
 date = os.environ.get("DATE","unknown")
 in_san  = f"reports/{date}/skywire_vitals_sanitized.json"
 out_js  = f"reports/{date}/skywire_sigma_analysis.json"
@@ -226,18 +191,16 @@ def write_outputs(analysis, notes):
       f"**Verdict:** {analysis.get('verdict','n/a')}",
       "",
       "## Notes",
-      notes or "n/a"
+      notes or "n/a",
     ]
     with open(out_md, "w", encoding="utf-8") as f:
         f.write("\n".join(md))
 
-# tentative d'import du moteur officiel
 try:
     mod = importlib.import_module("engine.sigma_analyzer")
     SigmaAnalyzer = getattr(mod, "SigmaAnalyzer")
     analyzer = SigmaAnalyzer()
     result = analyzer.analyze(data)
-    # on impose un schéma standard minimal
     analysis = {
       "date": date,
       "scores": result.get("scores", {}),
@@ -246,19 +209,13 @@ try:
     }
     write_outputs(analysis, "Analysis produced by official SigmaAnalyzer.")
 except Exception as e:
-    # fallback: calculs simples & verdict basique
     latencies = []
-    try:
-        if isinstance(data, dict):
-            payloads = data.get("payloads", [])
-            for p in payloads:
-                v = p.get("latency_ms")
-                if isinstance(v, (int,float)):
-                    latencies.append(float(v))
-    except Exception:
-        pass
-
-    avg = statistics.fmean(latencies) if latencies else None
+    if isinstance(data, dict):
+        for p in data.get("payloads", []):
+            v = p.get("latency_ms")
+            if isinstance(v, (int,float)):
+                latencies.append(float(v))
+    avg = (sum(latencies)/len(latencies)) if latencies else None
     score_stability = 100.0 if (avg is not None and avg < 100) else 60.0 if (avg is not None and avg < 200) else 30.0
     analysis = {
       "date": date,
@@ -269,18 +226,17 @@ except Exception as e:
         "equity": 80.0
       },
       "verdict": "healthy" if score_stability >= 60.0 else "degraded",
-      "engine": "fallback"
+      "engine": "fallback",
     }
     write_outputs(analysis, f"Official engine unavailable ({e}). Fallback scoring applied.")
 PY
+          python .tmp/integration_sigma.py
 
-          # Publier les outputs “latest” aussi
+          # publier aussi en latest/
           cp "reports/${DATE}/skywire_sigma_analysis.json" "reports/latest/skywire_sigma_analysis.json"
           cp "reports/${DATE}/skywire_sigma_summary.md"   "reports/latest/skywire_sigma_summary.md"
 
-      # --------------------------------------------------
       # 9) Artefacts d’intégration
-      # --------------------------------------------------
       - name: Upload Integration Reports (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -291,9 +247,7 @@ PY
           if-no-files-found: error
           retention-days: 7
 
-      # --------------------------------------------------
-      # 10) Commit & push des rapports
-      # --------------------------------------------------
+      # 10) Commit & push (branche main)
       - name: Commit & push reports
         if: ${{ github.ref == 'refs/heads/main' }}
         env:
