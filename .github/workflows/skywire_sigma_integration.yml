@@ -2,12 +2,6 @@ name: Sigma • Skywire capture → Sigma integration
 
 on:
   workflow_dispatch:
-  schedule:
-    # Tous les jours à 00:10 UTC (évite les collisions avec d'autres jobs)
-    - cron: "10 0 * * *"
-
-permissions:
-  contents: write
 
 jobs:
   integrate:
@@ -26,122 +20,95 @@ jobs:
 
       - name: Install deps
         run: |
-          set -euo pipefail
-          python -m pip install -U pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install requests pyyaml pandas matplotlib
-          fi
+          python -m pip install --upgrade pip
+          pip install requests pandas matplotlib || true
 
       - name: Date stamp (UTC)
         id: date
-        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Prepare folders
-        env:
-          ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          mkdir -p "$ARTIFACTS_ROOT/raw" "$ARTIFACTS_ROOT/sanitized"
-          mkdir -p reports/latest "data/${{ steps.date.outputs.date }}" .tmp
+          DATE="${{ steps.date.outputs.date }}"
+          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest" .tmp
 
       - name: Define endpoints env (auto-discovery safe defaults)
         run: |
           set -euo pipefail
-          echo "SKYWIRE_EXPLORER_BASE=https://skycoin.com/api" >> $GITHUB_ENV
-          echo "SKYWIRE_PUBLIC_GROUP=public" >> $GITHUB_ENV
-          echo "SKYWIRE_EXPLORER_GROUP=explorer" >> $GITHUB_ENV
+          printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # ---------- Capture ----------
+      # Try to reuse existing capture, else produce a minimal one
       - name: Run VitalSigns (produce JSON)
         env:
-          ARTIFACTS_ROOT: artifacts
+          DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          # Produit un JSON brut dans artifacts/raw ET copie dans data/<date>/
-          python scripts/skywire_vitals.py \
-            --out "artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json"
-          cp "artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json" \
-             "data/${{ steps.date.outputs.date }}/skywire_vitals.json"
+          OUT_JSON="data/${DATE}/skywire_vitals.json"
+          OUT_MD="data/${DATE}/skywire_summary.md"
 
-      - name: Upload RAW JSON (artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: skywire_raw_${{ steps.date.outputs.date }}
-          path: artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json
-          if-no-files-found: error
-          retention-days: 7
+          if [ -s "$OUT_JSON" ]; then
+            echo "✅ Reusing existing capture: $OUT_JSON"
+          elif [ -f scripts/skywire_vitals.py ]; then
+            echo "✅ Using scripts/skywire_vitals.py"
+            python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
+          else
+            echo "⚠️  Fallback minimal capture (inline Python)"
+            python - <<'PY'
+import os, json, datetime, pathlib
+d=os.environ.get('DATE','unknown')
+out_json=f"data/{d}/skywire_vitals.json"
+out_md  =f"data/{d}/skywire_summary.md"
+payload = {
+  "date_utc": d,
+  "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},
+  "groups": [{"name":"explorer","endpoints":[],"payloads":[]}],
+  "summary": {"height":None,"current_supply":None,"total_supply":None,"coin_hours":None}
+}
+pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
+with open(out_json,"w",encoding="utf-8") as f: json.dump(payload,f,ensure_ascii=False,indent=2)
+with open(out_md,"w",encoding="utf-8") as f:
+    f.write(f"# Skywire VitalSigns (fallback) — {d}\n")
+    f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
+PY
+          fi
 
-      # ---------- Sanitize + rapport rapide ----------
-      - name: Sanitize JSON (private → public-safe) + generate quick report
+      - name: Sanitize JSON (private → public-safe) + generate quick report + Sigma
         env:
-          ARTIFACTS_ROOT: artifacts
+          DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          python scripts/skywire_vital_report.py \
-            --in  "data/${{ steps.date.outputs.date }}/skywire_vitals.json" \
-            --out "artifacts/sanitized/skywire_vitals_sanitized_${{ steps.date.outputs.date }}.json" \
-            --md  "reports/latest/skywire_vital_report.md" \
-            --csv "reports/latest/skywire_vitals_timeseries.csv" \
-            --png "reports/latest/success_ratio_avg.png"
+          IN="data/${DATE}/skywire_vitals.json"
+          OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
+          OUT_MD="reports/${DATE}/skywire_vital_report.md"
+          OUT_SIG="reports/${DATE}/skywire_sigma_analysis.json"
+
+          # bridge.py doit produire les 3 outputs (sanitized, report, sigma)
+          python scripts/bridge.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD" --sigma "$OUT_SIG"
 
       - name: Upload SANITIZED JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: skywire_sanitized_${{ steps.date.outputs.date }}
-          path: artifacts/sanitized/skywire_vitals_sanitized_${{ steps.date.outputs.date }}.json
+          name: sigma_sanitized_${{ steps.date.outputs.date }}
+          path: reports/${{ steps.date.outputs.date }}/skywire_vitals_sanitized.json
           if-no-files-found: error
           retention-days: 7
-
-      # ---------- Préparer import du moteur ----------
-      - name: Make engine importable (package + PYTHONPATH)
-        run: |
-          set -euo pipefail
-          # S’assure que engine/ est un paquet Python
-          if [ -d engine ] && [ ! -f engine/__init__.py ]; then
-            echo "# package marker" > engine/__init__.py
-          fi
-          # Expose la racine du repo aux imports Python
-          echo "PYTHONPATH=$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
-
-      # ---------- Intégration Skywire → Sigma ----------
-      - name: Run Integration (Skywire → Sigma) + reports
-        env:
-          # récupère le PYTHONPATH enrichi
-          PYTHONPATH: ${{ env.PYTHONPATH }}
-        run: |
-          set -euo pipefail
-          # Le script écrit par défaut dans reports/latest/ + reports/<date>/
-          python network_bridge/run_network_integrated.py \
-            --network skywire \
-            --discovery "data/${{ steps.date.outputs.date }}" \
-            --also-md \
-            --claude-report
 
       - name: Upload Integration Reports (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: sigma_integration_${{ steps.date.outputs.date }}
+          name: sigma_reports_${{ steps.date.outputs.date }}
           path: |
-            reports/latest/**
-            reports/${{ steps.date.outputs.date }}/**
-          if-no-files-found: warn
-          retention-days: 14
+            reports/${{ steps.date.outputs.date }}/skywire_vital_report.md
+            reports/${{ steps.date.outputs.date }}/skywire_sigma_analysis.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Commit & push reports
         run: |
           set -euo pipefail
-          # Snapshot daté
-          mkdir -p "reports/${{ steps.date.outputs.date }}"
-          rsync -a --delete "reports/latest/" "reports/${{ steps.date.outputs.date }}/"
-          git config user.name  "sigma-bot"
-          git config user.email "sigma-bot@deepkang.labs"
-          git add reports/ "data/${{ steps.date.outputs.date }}/skywire_vitals.json" || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(reports): Skywire→Sigma integration snapshot for ${{ steps.date.outputs.date }}"
-            git pull --rebase
-            git push
-          else
-            echo "Nothing to commit."
-          fi
+          git config user.name "sigma-bot"
+          git config user.email "bot@deepkang.local"
+          git add reports/ data/
+          git commit -m "report(sigma): Skywire capture → Sigma — ${{ steps.date.outputs.date }}" || echo "no changes"
+          git push origin main || true
