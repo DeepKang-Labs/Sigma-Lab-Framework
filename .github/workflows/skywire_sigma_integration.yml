@@ -2,29 +2,19 @@ name: Sigma • Skywire capture → Sigma integration
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/skywire_sigma_integration.yml"
-      - "scripts/**"
-      - "data/**"
-      - "reports/**"
-
-permissions:
-  contents: write
-
-concurrency:
-  group: sigma-integration-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   integrate:
     runs-on: ubuntu-latest
+
     steps:
+      # 0) Checkout
       - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 1) Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -35,22 +25,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pandas matplotlib || true
 
+      # 2) Horodatage (UTC)
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
+      # 3) Prépare dossiers
       - name: Prepare folders
         run: |
           set -euo pipefail
           DATE="${{ steps.date.outputs.date }}"
-          mkdir -p "data/${DATE}" "reports/${DATE}" "reports/latest" .tmp
+          mkdir -p "data/${DATE}" "reports/${DATE}" reports/latest .tmp
 
+      # 4) Valeurs sûres (placeholder auto-discovery)
       - name: Define endpoints env (auto-discovery safe defaults)
         run: |
           set -euo pipefail
           printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # 1) Reuse capture if already present; else minimal fallback
+      # 5) Reuse capture si déjà présente ; sinon scripts ; sinon mini-fallback
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -60,12 +53,12 @@ jobs:
           OUT_MD="data/${DATE}/skywire_summary.md"
 
           if [ -s "$OUT_JSON" ]; then
-            echo "Reusing existing capture: $OUT_JSON"
+            echo "♻️  Reusing existing capture: $OUT_JSON"
           elif [ -f scripts/skywire_vitals.py ]; then
-            echo "Using scripts/skywire_vitals.py"
+            echo "✅ Using scripts/skywire_vitals.py"
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "Fallback minimal capture (inline Python → file)"
+            echo "⚠️  Fallback minimal capture (inline Python → file)"
             mkdir -p .tmp
             cat > .tmp/fallback_vitals.py <<'PY'
 import os, json, datetime, pathlib
@@ -74,22 +67,22 @@ out_json = f"data/{d}/skywire_vitals.json"
 out_md   = f"data/{d}/skywire_summary.md"
 payload = {
   "date_utc": d,
-  "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
-  "groups": [{"name": "explorer", "endpoints": [], "payloads": []}],
-  "summary": {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None}
+  "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},
+  "groups": [{"name":"explorer","endpoints":[],"payloads":[]}],
+  "summary": {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None, "note": None}
 }
 pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-with open(out_json, "w", encoding="utf-8") as f:
-    json.dump(payload, f, ensure_ascii=False, indent=2)
-with open(out_md, "w", encoding="utf-8") as f:
-    f.write(f"# Skywire VitalSigns (fallback) — {d}\n")
+with open(out_json,"w",encoding="utf-8") as f:
+    json.dump(payload,f,ensure_ascii=False,indent=2)
+with open(out_md,"w",encoding="utf-8") as f:
+    f.write(f"# Skywire VitalSigns (fallback) — {d}\n\n")
     f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
 PY
             python .tmp/fallback_vitals.py
           fi
 
-      # 2) Sanitize + MD + Transform → Sigma (bridge.py)
-      - name: Sanitize JSON (private → public-safe) + generate quick report + Sigma
+      # 6) Sanitize + MD + Transform → Sigma (bridge.py)
+      - name: Sanitize + Report + Transform → Sigma
         env:
           DATE: ${{ steps.date.outputs.date }}
         run: |
@@ -98,15 +91,19 @@ PY
           OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
           OUT_SIG="reports/${DATE}/skywire_sigma_analysis.json"
-          python scripts/bridge.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD" --sigma "$OUT_SIG"
 
+          python scripts/bridge.py \
+            --in "$IN" \
+            --out "$OUT_SAN" \
+            --md "$OUT_MD" \
+            --sigma "$OUT_SIG"
+
+      # 7) Artifacts utiles
       - name: Upload SANITIZED JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: sigma_sanitized_${{ steps.date.outputs.date }}
           path: reports/${{ steps.date.outputs.date }}/skywire_vitals_sanitized.json
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Upload Integration Reports (artifact)
         uses: actions/upload-artifact@v4
@@ -115,14 +112,17 @@ PY
           path: |
             reports/${{ steps.date.outputs.date }}/skywire_vital_report.md
             reports/${{ steps.date.outputs.date }}/skywire_sigma_analysis.json
-          if-no-files-found: error
-          retention-days: 7
 
+      # 8) Commit & push (sans rebase bloquant)
       - name: Commit & push reports
+        env:
+          DATE: ${{ steps.date.outputs.date }}
         run: |
           set -euo pipefail
-          git config user.name "sigma-bot"
-          git config user.email "bot@deepkang.local"
-          git add reports/ data/
-          git commit -m "report(sigma): Skywire capture → Sigma — ${{ steps.date.outputs.date }}" || echo "no changes"
-          git push origin "${GITHUB_REF_NAME:-main}" || true
+          git config user.name  "sigma-bot"
+          git config user.email "actions@github.com"
+          git add "reports/${DATE}" "reports/latest" || true
+          git add "data/${DATE}" || true
+          git commit -m "report(skywire): vitals + integration — ${DATE}" || echo "No changes to commit"
+          # pousse directement sur la branche courante
+          git push origin HEAD:${GITHUB_REF_NAME}
