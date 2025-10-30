@@ -57,19 +57,22 @@ jobs:
             mkdir -p .tmp
             cat > .tmp/fallback_vitals.py <<'PY'
 import os, json, datetime, pathlib
-d = os.environ.get('DATE','unknown')
+
+d = os.environ.get("DATE", "unknown")
 out_json = f"data/{d}/skywire_vitals.json"
 out_md   = f"data/{d}/skywire_summary.md"
+
 payload = {
-  "date_utc": d,
-  "meta": {"source":"fallback","repo":"Sigma-Lab-Framework"},
-  "groups": [{"name":"explorer","endpoints":[],"payloads":[]}],
-  "summary": {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None, "note": None}
+    "date_utc": d,
+    "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
+    "groups": [{"name": "explorer", "endpoints": [], "payloads": []}],
+    "summary": {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None, "note": None}
 }
+
 pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-with open(out_json,"w",encoding="utf-8") as f:
-    json.dump(payload,f,ensure_ascii=False,indent=2)
-with open(out_md,"w",encoding="utf-8") as f:
+with open(out_json, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+with open(out_md, "w", encoding="utf-8") as f:
     f.write(f"# Skywire VitalSigns (fallback) — {d}\n\n")
     f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
 PY
@@ -92,7 +95,7 @@ PY
             --md "$OUT_MD" \
             --sigma "$OUT_SIG"
 
-      - name: Upload sanitized json
+      - name: Upload sanitized JSON
         uses: actions/upload-artifact@v4
         with:
           name: sigma_sanitized_${{ steps.date.outputs.date }}
