@@ -1,0 +1,19 @@
+{
+  "date_utc": "2025-10-30",
+  "meta": {
+    "source": "DeepKang-Labs/Sigma-Lab-Framework",
+    "agent": "SkywireVitalSigns v3.4.0"
+  },
+  "metrics": {
+    "current_supply": 0.0,
+    "total_supply": 0.0,
+    "coin_hours_total": 0.0,
+    "groups_detected": 4,
+    "endpoints_total": 9,
+    "payloads_total": 9,
+    "payloads_ok": 0,
+    "payloads_failed": 9,
+    "availability_ratio_%": 0.0
+  },
+  "notes": "Bridge Skywire → Sigma : endpoints & supply aggregated."
+}
