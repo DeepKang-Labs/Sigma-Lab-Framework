@@ -1,13 +1,9 @@
-name: Skywire VitalSigns
+name: Skywire • Vitals capture & report
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 03 * * *" # daily 03:17 UTC
-
-concurrency:
-  group: skywire-vitals-${{ github.ref }}
-  cancel-in-progress: true
+    - cron: "0 0 * * *" # tous les jours à 00:00 UTC
 
 permissions:
   contents: write
@@ -15,132 +11,112 @@ permissions:
 jobs:
   vitals:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
-      - name: Checkout (full history)
+      - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.x"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install requests pyyaml
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests pyyaml pandas matplotlib
+          fi
 
-      - name: Date stamp (UTC)
+      - name: Date (UTC)
         id: date
-        run: echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare folders
+        env:
+          ARTIFACTS_ROOT: artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACTS_ROOT/raw" "$ARTIFACTS_ROOT/sanitized"
+          mkdir -p "data/${{ steps.date.outputs.date }}" "reports/latest"
 
       - name: Define endpoints env
         run: |
-          echo "EXPLORER_ENDPOINTS=https://explorer.skycoin.com/api/blockchain/metadata,https://explorer.skycoin.com/api/coinSupply" >> "$GITHUB_ENV"
-          echo "PUBLIC_ENDPOINTS=https://sd.skycoin.com/api/services?type=proxy,https://sd.skycoin.com/api/services?type=vpn,https://tpd.skywire.skycoin.com/all-transports,https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries,https://rf.skywire.skycoin.com/" >> "$GITHUB_ENV"
-          echo "FIBER_ENDPOINTS=https://fiber.skywire.dev/api/status,https://fiber.skywire.dev/api/metrics" >> "$GITHUB_ENV"
-          echo "VISORS_PKS_FILE=.tmp/visors_pks.txt" >> "$GITHUB_ENV"
-
-      - name: Build .tmp/visors_pks.txt (auto-discovery)
-        run: |
           set -euo pipefail
-          mkdir -p .tmp
-          echo "# Auto-discovered PKs list" > .tmp/visors_pks.txt
-          # Découverte des visors publiés (si JSON avec .pk)
-          curl -sS "https://sd.skycoin.com/api/services?type=visor" | jq -r '.[].pk?' | sed '/^null$/d;/^$/d' >> .tmp/visors_pks.txt || true
-          echo "[Info] PKs auto-discovery done: $(wc -l < .tmp/visors_pks.txt) entries."
+          echo "SKYWIRE_EXPLORER_BASE=https://skycoin.com/api" >> $GITHUB_ENV
+          echo "SKYWIRE_PUBLIC_GROUP=public" >> $GITHUB_ENV
+          echo "SKYWIRE_EXPLORER_GROUP=explorer" >> $GITHUB_ENV
 
+      # ---------- Capture ----------
       - name: Run VitalSigns (produce JSON)
         env:
-          TODAY: ${{ steps.date.outputs.date }}
+          ARTIFACTS_ROOT: artifacts
         run: |
           set -euo pipefail
-          mkdir -p "data/${TODAY}"
-          python scripts/skywire_vitals.py
-          echo "✅ Wrote vital data for ${TODAY}"
+          python scripts/skywire_vitals.py \
+            --out "artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json"
+          cp "artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json" \
+             "data/${{ steps.date.outputs.date }}/skywire_vitals.json"
 
       - name: Upload RAW JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: skywire_vitals_raw_${{ steps.date.outputs.date }}
-          path: data/${{ steps.date.outputs.date }}/skywire_vitals.json
-          if-no-files-found: warn
-          retention-days: 14
+          name: skywire_raw_${{ steps.date.outputs.date }}
+          path: artifacts/raw/skywire_vitals_${{ steps.date.outputs.date }}.json
+          if-no-files-found: error
+          retention-days: 10
 
-      - name: Sanitize JSON (private → public-safe)
+      # ---------- Sanitize + reporting ----------
+      - name: Sanitize JSON + quick report (MD/CSV/PNG)
         env:
-          TODAY: ${{ steps.date.outputs.date }}
+          ARTIFACTS_ROOT: artifacts
         run: |
-          set -e
-          python - <<'PY'
-          import os, json, sys
-          today = os.getenv("TODAY")
-          p = f"data/{today}/skywire_vitals.json"
-          q = f"data/{today}/skywire_vitals_sanitized.json"
-          try:
-              with open(p) as f:
-                  doc = json.load(f)
-          except FileNotFoundError:
-              print("⚠️ No raw JSON found.")
-              sys.exit(0)
-          for g in doc.get("groups", []):
-              if g.get("name") == "nodes":
-                  g["visors_pks"] = []
-                  s = g.get("summary", {}) or {}
-                  if "ut_note" in s:
-                      s["ut_note"] = "(redacted)"
-                  g["summary"] = s
-          with open(q, "w") as f:
-              json.dump(doc, f, indent=2, ensure_ascii=False)
-          print(f"✅ Sanitized written: {q}")
-          PY
+          set -euo pipefail
+          python scripts/skywire_vital_report.py \
+            --in  "data/${{ steps.date.outputs.date }}/skywire_vitals.json" \
+            --out "artifacts/sanitized/skywire_vitals_sanitized_${{ steps.date.outputs.date }}.json" \
+            --md  "reports/latest/skywire_vital_report.md" \
+            --csv "reports/latest/skywire_vitals_timeseries.csv" \
+            --png "reports/latest/success_ratio_avg.png"
 
       - name: Upload SANITIZED JSON (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: skywire_vitals_sanitized_${{ steps.date.outputs.date }}
-          path: data/${{ steps.date.outputs.date }}/skywire_vitals_sanitized.json
-          if-no-files-found: warn
-          retention-days: 14
+          name: skywire_sanitized_${{ steps.date.outputs.date }}
+          path: artifacts/sanitized/skywire_vitals_sanitized_${{ steps.date.outputs.date }}.json
+          if-no-files-found: error
+          retention-days: 10
 
-      # ========= NOUVELLE ÉTAPE : Intégration Skywire → Sigma =========
-      - name: Install local engine deps for integration
-        run: |
-          set -euo pipefail
-          # dépendances minimales pour run_network_integrated.py
-          pip install --no-cache-dir pyyaml
-
-      - name: Run Integration (Skywire → Sigma) + reports
-        run: |
-          set -euo pipefail
-          python network_bridge/run_network_integrated.py \
-            --network skywire \
-            --discovery data/ \
-            --also-md \
-            --claude-report
-
-      - name: Upload Integration Reports (artifact)
+      - name: Upload report bundle (latest/)
         uses: actions/upload-artifact@v4
         with:
-          name: sigma_integration_${{ steps.date.outputs.date }}
-          path: reports/integrations/
-          if-no-files-found: warn
-          retention-days: 14
+          name: skywire_report_latest_${{ steps.date.outputs.date }}
+          path: |
+            reports/latest/skywire_vital_report.md
+            reports/latest/skywire_vitals_timeseries.csv
+            reports/latest/success_ratio_avg.png
+          if-no-files-found: error
+          retention-days: 10
 
-      - name: Commit & push reports
-        env:
-          TODAY: ${{ steps.date.outputs.date }}
+      # ---------- Snapshot + commit ----------
+      - name: Commit & push daily snapshot
         run: |
           set -euo pipefail
+          mkdir -p "reports/${{ steps.date.outputs.date }}"
+          rsync -a --delete "reports/latest/" "reports/${{ steps.date.outputs.date }}/"
           git config user.name  "sigma-bot"
           git config user.email "sigma-bot@deepkang.labs"
-          git add reports/integrations/ || true
-          git add data/${TODAY}/skywire_vitals*.json || true
-          git commit -m "chore(reports): Skywire→Sigma integration run for ${TODAY}" || echo "No changes to commit."
-          git pull --rebase
-          git push
+          git add "data/${{ steps.date.outputs.date }}/skywire_vitals.json" \
+                  "reports/latest" "reports/${{ steps.date.outputs.date }}" || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(vitals): Skywire capture & report for ${{ steps.date.outputs.date }}"
+            git pull --rebase
+            git push
+          else
+            echo "Nothing to commit."
+          fi
