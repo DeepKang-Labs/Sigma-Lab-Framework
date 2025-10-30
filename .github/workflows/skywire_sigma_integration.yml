@@ -9,7 +9,6 @@ on:
       - "data/**"
       - "reports/**"
 
-# autoriser le workflow à committer/pousser
 permissions:
   contents: write
 
@@ -20,7 +19,6 @@ concurrency:
 jobs:
   integrate:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout (full)
         uses: actions/checkout@v4
@@ -52,7 +50,7 @@ jobs:
           set -euo pipefail
           printf "036a...dummyA\n047b...dummyB\n" > .tmp/visors_pks.txt
 
-      # 1) Reutilise la capture si déjà présente, sinon fallback mini-capture
+      # 1) Reuse capture if already present; else minimal fallback
       - name: Run VitalSigns (produce JSON)
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -62,26 +60,32 @@ jobs:
           OUT_MD="data/${DATE}/skywire_summary.md"
 
           if [ -s "$OUT_JSON" ]; then
-            echo "✅ Reusing existing capture: $OUT_JSON"
+            echo "Reusing existing capture: $OUT_JSON"
           elif [ -f scripts/skywire_vitals.py ]; then
-            echo "✅ Using scripts/skywire_vitals.py"
+            echo "Using scripts/skywire_vitals.py"
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "⚠️  Fallback minimal capture (inline Python)"
-            python - <<'PY'
+            echo "Fallback minimal capture (inline Python → file)"
+            mkdir -p .tmp
+            cat > .tmp/fallback_vitals.py <<'PY'
 import os, json, datetime, pathlib
-d=os.environ.get('DATE','unknown')
-out_json=f"data/{d}/skywire_vitals.json"
-out_md  =f"data/{d}/skywire_summary.md"
-payload={"date_utc":d,"meta":{"source":"fallback","repo":"Sigma-Lab-Framework"},
-         "groups":[{"name":"explorer","endpoints":[],"payloads":[]}],
-         "summary":{"height":None,"current_supply":None,"total_supply":None,"coin_hours":None}}
+d = os.environ.get('DATE','unknown')
+out_json = f"data/{d}/skywire_vitals.json"
+out_md   = f"data/{d}/skywire_summary.md"
+payload = {
+  "date_utc": d,
+  "meta": {"source": "fallback", "repo": "Sigma-Lab-Framework"},
+  "groups": [{"name": "explorer", "endpoints": [], "payloads": []}],
+  "summary": {"height": None, "current_supply": None, "total_supply": None, "coin_hours": None}
+}
 pathlib.Path(os.path.dirname(out_json)).mkdir(parents=True, exist_ok=True)
-with open(out_json,"w",encoding="utf-8") as f: json.dump(payload,f,ensure_ascii=False,indent=2)
-with open(out_md,"w",encoding="utf-8") as f:
+with open(out_json, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+with open(out_md, "w", encoding="utf-8") as f:
     f.write(f"# Skywire VitalSigns (fallback) — {d}\n")
     f.write(f"- generated: {datetime.datetime.utcnow().isoformat()}Z\n")
 PY
+            python .tmp/fallback_vitals.py
           fi
 
       # 2) Sanitize + MD + Transform → Sigma (bridge.py)
