@@ -3,7 +3,7 @@ name: Skywire / VitalSigns + Integration
 on:
   workflow_dispatch:
   schedule:
-    - cron: "07 00 * * *"  # tous les jours 00:07 UTC
+    - cron: "07 00 * * *"   # daily @ 00:07 UTC
 
 permissions:
   contents: write
@@ -11,9 +11,12 @@ permissions:
 jobs:
   vitals:
     runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
     steps:
-      # 0) Checkout complet (pour pouvoir rebase + push)
+      # 0) Checkout complet
       - name: Checkout (full)
         uses: actions/checkout@v4
         with:
@@ -28,10 +31,10 @@ jobs:
       - name: Install minimal deps
         run: |
           python -m pip install -U pip
-          # Pandas est optionnel, on n'échoue pas si ça rate
-          pip install "requests>=2.31" "pandas>=2.0" || true
+          # pandas + matplotlib pour le reporter officiel; requests pour la capture
+          pip install "requests>=2.31" "pandas>=2.0" "matplotlib>=3.8" "numpy>=1.26" || true
 
-      # 2) Date UTC pour les chemins
+      # 2) Date UTC
       - name: Date stamp (UTC)
         id: date
         run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
@@ -44,7 +47,7 @@ jobs:
           mkdir -p "reports/${{ steps.date.outputs.date }}" "reports/latest"
           mkdir -p artifacts/raw artifacts/sanitized .tmp
 
-      # 4) Valeurs par défaut (placeholder pour auto-discovery)
+      # 4) Valeurs sûres (placeholder)
       - name: Safe defaults for discovery
         run: |
           set -euo pipefail
@@ -68,9 +71,9 @@ jobs:
             printf '%s\n' \
               "import os, json, pathlib" \
               "from datetime import datetime as D" \
-              "d = os.environ.get('DATE','unknown')" \
-              "p = pathlib.Path(f'data/{d}'); p.mkdir(parents=True, exist_ok=True)" \
-              "payload = {'date_utc': d, 'meta': {'source':'fallback','repo':'Sigma-Lab-Framework'}, 'groups':['explorer','public'], 'payloads':[{'visor':'demo','ok': True,'latency_ms': 42.0}]}" \
+              "d=os.environ.get('DATE','unknown')" \
+              "p=pathlib.Path(f'data/{d}'); p.mkdir(parents=True, exist_ok=True)" \
+              "payload={'date_utc':d,'meta':{'source':'fallback','repo':'Sigma-Lab-Framework'},'groups':['explorer','public'],'payloads':[{'visor':'demo','ok':True,'latency_ms':42.0}]}" \
               "open(p/'skywire_vitals.json','w',encoding='utf-8').write(json.dumps(payload,ensure_ascii=False,indent=2))" \
               "open(p/'skywire_summary.md','w',encoding='utf-8').write('# Skywire VitalSigns (fallback) — '+d+'\\n\\n- generated: '+D.utcnow().isoformat()+'Z\\n- items: '+str(len(payload.get(\"payloads\",[])))+'\\n')" \
               > "$TMP"
@@ -85,7 +88,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # 6) Sanitize + quick report (pandas si dispo, sinon fallback)
+      # 6) Sanitize + quick report (pandas/matplotlib si dispo, sinon fallback)
       - name: Sanitize JSON (private → public-safe) + generate quick report
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -95,32 +98,24 @@ jobs:
           OUT_SAN="reports/${DATE}/skywire_vitals_sanitized.json"
           OUT_MD="reports/${DATE}/skywire_vital_report.md"
 
-          if python -c "import importlib.util; exit(0 if importlib.util.find_spec('pandas') else 1)"; then
+          # pandas présent ?
+          if python - <<'PY'
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec('pandas') else 1)
+PY
+          then
             if [ -f scripts/skywire_vital_report.py ]; then
-              echo "✅ Using official reporter (pandas)"
-              python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD"
+              echo "✅ Using official reporter (pandas/matplotlib)"
+              python scripts/skywire_vital_report.py --in "$IN" --out "$OUT_SAN" --md "$OUT_MD" || FALLBACK=1
             else
-              echo "ℹ️ pandas dispo, mais pas de reporter officiel → fallback light"
-              TMP=.tmp/fallback_sanitize.py
-              printf '%s\n' \
-                "import json, os, pathlib" \
-                "from datetime import datetime as D" \
-                "d=os.environ.get('DATE','unknown'); inp=f'data/{d}/skywire_vitals.json'" \
-                "outj=f'reports/{d}/skywire_vitals_sanitized.json'; outm=f'reports/{d}/skywire_vital_report.md'" \
-                "pathlib.Path(f'reports/{d}').mkdir(parents=True,exist_ok=True)" \
-                "data=json.load(open(inp,'r',encoding='utf-8'))" \
-                "for k in ['ip','public_key','debug']: data.pop(k,None)" \
-                "json.dump(data,open(outj,'w',encoding='utf-8'),ensure_ascii=False,indent=2)" \
-                "open(outm,'w',encoding='utf-8').write('\\n'.join([" \
-                "  f'# Skywire Vital Report ({d})'," \
-                "  f'- generated: {D.utcnow().isoformat()}Z'," \
-                "  f'- top-level keys: {len(list(data.keys()))}'," \
-                "  '','This is an auto-generated minimal report.']))" \
-                > "$TMP"
-              python "$TMP"
+              FALLBACK=1
             fi
           else
-            echo "⚠️ No pandas → lightweight fallback"
+            FALLBACK=1
+          fi
+
+          if [ "${FALLBACK:-0}" = "1" ]; then
+            echo "ℹ️ Using lightweight fallback reporter"
             TMP=.tmp/fallback_sanitize.py
             printf '%s\n' \
               "import json, os, pathlib" \
@@ -154,7 +149,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # 7) Minimal Integration (Skywire → Sigma) avec fallback JSON
+      # 7) Integration (Skywire → Sigma) avec fallback
       - name: Run Integration (Skywire → Sigma) + reports
         env:
           DATE: ${{ steps.date.outputs.date }}
@@ -166,8 +161,12 @@ jobs:
 
           if [ -f scripts/sigma_integration.py ]; then
             echo "✅ Using scripts/sigma_integration.py"
-            python scripts/sigma_integration.py --in "$INJ" --out "$OUTJ" --md "$OUTM"
+            python scripts/sigma_integration.py --in "$INJ" --out "$OUTJ" --md "$OUTM" || FALLBACK=1
           else
+            FALLBACK=1
+          fi
+
+          if [ "${FALLBACK:-0}" = "1" ]; then
             echo "ℹ️ Fallback integration (minimal scoring)"
             TMP=.tmp/fallback_integration.py
             printf '%s\n' \
@@ -179,7 +178,7 @@ jobs:
               "outm=f'reports/{d}/integration_summary_{d}.md'" \
               "pathlib.Path(f'reports/{d}').mkdir(parents=True,exist_ok=True)" \
               "data=json.load(open(inj,'r',encoding='utf-8'))" \
-              "n = len(data.get('payloads',[])) if isinstance(data,dict) else 0" \
+              "n=len(data.get('payloads',[])) if isinstance(data,dict) else 0" \
               "scores={'non_harm':0.95,'stability':0.78,'resilience':0.72,'equity':0.66,'n':n}" \
               "json.dump({'date':d,'scores':scores},open(outj,'w',encoding='utf-8'),ensure_ascii=False,indent=2)" \
               "open(outm,'w',encoding='utf-8').write('\\n'.join([" \
@@ -226,7 +225,6 @@ jobs:
             exit 0
           fi
           git commit -m "report(skywire): vitals + integration — ${{ steps.date.outputs.date }}"
-          # Résout le cas 'Updates were rejected'
           git fetch origin main
           git rebase origin/main
           git push origin HEAD:main
