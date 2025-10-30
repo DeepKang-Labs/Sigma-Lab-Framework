@@ -3,7 +3,7 @@ name: Skywire / VitalSigns + Sigma Integration
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 3 * * *"   # 03:17 UTC daily
 
 permissions:
   contents: write
@@ -52,19 +52,11 @@ jobs:
           OUT_MD="data/${DATE}/skywire_summary.md"
 
           if [ -f scripts/skywire_vitals.py ]; then
-            echo "✅ Using scripts/skywire_vitals.py"
+            echo "Using scripts/skywire_vitals.py"
             python scripts/skywire_vitals.py --out "$OUT_JSON" --summary "$OUT_MD"
           else
-            echo "⚠️  Fallback VitalSigns (python -c one-liner)"
-            python -c "import os,json,datetime,pathlib,os.path; \
-d=os.environ.get('DATE','unknown'); \
-oj=f'data/{d}/skywire_vitals.json'; om=f'data/{d}/skywire_summary.md'; \
-payload={'date_utc':d,'meta':{'source':'fallback','repo':'Sigma-Lab-Framework'}, \
-'groups':[{'name':'explorer','endpoints':[],'payloads':[]}], \
-'summary':{'height':None,'current_supply':None,'total_supply':None,'coin_hours':None}}; \
-pathlib.Path(os.path.dirname(oj)).mkdir(parents=True, exist_ok=True); \
-open(oj,'w',encoding='utf-8').write(json.dumps(payload,ensure_ascii=False,indent=2)); \
-open(om,'w',encoding='utf-8').write('# Skywire VitalSigns (fallback)\\n\\n- generated: '+datetime.datetime.utcnow().isoformat()+'Z\\n')"
+            echo "Fallback VitalSigns via python -c (single line)"
+            python -c "import os,json,datetime,pathlib; d=os.environ.get('DATE','unknown'); oj=f'data/{d}/skywire_vitals.json'; om=f'data/{d}/skywire_summary.md'; payload={'date_utc':d,'meta':{'source':'fallback','repo':'Sigma-Lab-Framework'},'groups':[{'name':'explorer','endpoints':[],'payloads':[]}],'summary':{'height':None,'current_supply':None,'total_supply':None,'coin_hours':None}}; pathlib.Path(oj).parent.mkdir(parents=True,exist_ok=True); open(oj,'w',encoding='utf-8').write(json.dumps(payload,ensure_ascii=False,indent=2)); open(om,'w',encoding='utf-8').write('# Skywire VitalSigns (fallback)\\n\\n- generated: '+datetime.datetime.utcnow().isoformat()+'Z\\n')"
           fi
 
       - name: Upload RAW JSON (artifact)
@@ -104,7 +96,7 @@ open(om,'w',encoding='utf-8').write('# Skywire VitalSigns (fallback)\\n\\n- gene
           if [ -f scripts/sigma_report.py ]; then
             python scripts/sigma_report.py --in "$SIG" --date "$DATE"
           else
-            echo '{"ok": true, "note": "sigma_report.py missing, placeholder pass"}' > "reports/${DATE}/integration_summary_${DATE}.md"
+            echo "Auto-generated placeholder integration summary for ${DATE}" > "reports/${DATE}/integration_summary_${DATE}.md"
           fi
 
       - name: Upload Integration Reports (artifact)
