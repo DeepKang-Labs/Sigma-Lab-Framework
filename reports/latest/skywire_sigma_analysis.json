@@ -1,1 +1,19 @@
-../2025-10-31/skywire_sigma_analysis.json
+{
+  "date_utc": "2025-10-31",
+  "engine": "sigma-v1",
+  "inputs": {
+    "source": "unknown",
+    "payloads": 9
+  },
+  "features": {
+    "success_ratio_pct": 66.67,
+    "latency_avg_ms": null,
+    "supply": {
+      "height": null,
+      "current": null,
+      "total": null,
+      "coin_hours": null
+    }
+  },
+  "generated_utc": "2025-10-31T04:00:17.488489Z"
+}
