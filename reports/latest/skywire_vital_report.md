@@ -1,1 +1,1 @@
-../2025-10-30/skywire_vital_report.md
+../2025-10-31/skywire_vital_report.md
