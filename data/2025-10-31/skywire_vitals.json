@@ -76,10 +76,10 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 875,
+        "proxies": 872,
         "vpn": 120,
-        "transports": 660,
-        "dmsg_entries": 2854,
+        "transports": 655,
+        "dmsg_entries": 2859,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
@@ -174,9 +174,9 @@
               }
             },
             {
-              "address": "0247d0195a22ea27cb939616453fd262c17bd759ace589e05161901c588cf36272:44",
+              "address": "031c80f24388e1050c8f69221b63178e5f4d54d5b656aa6662e67d29aa4cfff97a:44",
               "type": "vpn",
-              "version": "v1.3.23",
+              "version": "v1.3.24",
               "geo": {
                 "lat": -6.18,
                 "lon": 106.83,
