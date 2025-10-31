@@ -1,0 +1,71 @@
+name: Sigma-Dynamics (virtual link)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}   # permet de lancer manuellement
+  # schedule:
+  #   - cron: "0 6 * * *"  # optionnel: run quotidien
+
+jobs:
+  fetch-and-run:
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg   # backend matplotlib headless
+
+    steps:
+      - name: Checkout Sigma-Lab
+        uses: actions/checkout@v4
+
+      - name: Checkout Sigma-Dynamics (external)
+        uses: actions/checkout@v4
+        with:
+          repository: DeepKang-Labs/Sigma-Dynamics
+          ref: main
+          path: network_bridge/sigma-dynamics   # ← “submodule” virtuel
+
+      - name: Show tree
+        run: |
+          echo "Sigma-Lab root:"
+          ls -la
+          echo "Sigma-Dynamics under network_bridge/:"
+          ls -la network_bridge/sigma-dynamics
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "network_bridge/sigma-dynamics/requirements.txt" ]; then \
+            pip install -r network_bridge/sigma-dynamics/requirements.txt ; \
+          fi
+
+      # --- Run a quick simulation (optionnel, tu peux le garder) ---
+      - name: Run Sigma-Dynamics demo
+        run: |
+          python network_bridge/sigma-dynamics/sigma_dynamics.py
+          echo "RUN_DIR=$(ls -d sigma_dynamics_artifacts_* | tail -n 1)" >> $GITHUB_ENV
+
+      - name: Upload artifacts (simulation)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma-dynamics-sim-artifacts
+          path: ${{ env.RUN_DIR }}
+          if-no-files-found: warn
+
+      # --- (Optionnel) Run stream eval si tu ajoutes une config dans Sigma-Lab ---
+      # - name: Run stream eval (if config exists)
+      #   run: |
+      #     if [ -f "configs/stream_skywire.yaml" ]; then
+      #       python network_bridge/sigma-dynamics/sigma_stream_eval.py --config configs/stream_skywire.yaml
+      #     fi
+      #
+      # - name: Upload artifacts (stream)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: sigma-dynamics-stream-artifacts
+      #     path: sigma_stream_artifacts/**
+      #     if-no-files-found: warn
