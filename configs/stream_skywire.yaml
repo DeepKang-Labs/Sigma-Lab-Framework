@@ -1,0 +1,45 @@
+# Sigma Stream Config — Skywire / PrivateNess via HTTP JSON
+adapter:
+  type: skywire
+  mode: http
+  # Remplace cette URL par l'endpoint JSON réel (ex: http://IP:9108/metrics)
+  endpoint: "http://YOUR_NODE_PUBLIC_IP:9108/metrics"
+  poll_seconds: 5       # fréquence de lecture
+  window_seconds: 60    # fenêtre glissante pour normalisation quantile
+
+# Mapping: noms des champs que renvoie ton endpoint JSON -> dimensions Sigma
+mapping:
+  harm_keys: ["packet_loss", "err_rate", "drops_rate"]
+  ineq_keys: ["bandwidth_gini", "throughput_ineq"]
+  vol_keys:  ["latency_jitter_ms", "throughput_variance"]
+  rec_keys:  ["recovery_score", "mttr_norm_inv"]   # 1 - mttr_norm
+
+# Détection de contexte (facultatif mais utile)
+context:
+  crisis_rules:
+    - key: "packet_loss"
+      op: ">"
+      value: 0.05
+    - key: "latency_jitter_ms"
+      op: ">"
+      value: 40
+  degraded_rules:
+    - key: "throughput_variance"
+      op: ">"
+      value: 0.15
+
+# Paramètres des seuils (θ) et de la mémoire morale (M)
+theta:
+  base: 0.60
+  ctx_boost:
+    normal: 0.00
+    degraded: -0.02
+    crisis: -0.05
+
+memory:
+  lambda: 0.08  # pondération récence (sigmoïde)
+
+# Sortie des artefacts
+output:
+  outdir: "sigma_stream_artifacts"
+  run_tag: "skywire-live"
