@@ -25,10 +25,6 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      # Entrées (syntaxe correcte)
-      SIGMA_PROMPT: ${{ github.event.inputs.prompt != '' && github.event.inputs.prompt || 'Diagnostic quotidien : état réseau & marché.' }}
-      SIGMA_LLM_MODEL: ${{ github.event.inputs.model_name != '' && github.event.inputs.model_name || 'gpt2' }}
-
       # Dossiers standard Sigma-Lab
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
@@ -48,6 +44,25 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools
           pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib"
+
+      # ---- Resolve inputs safely (no YAML logic in env) ----
+      - name: Resolve inputs → $GITHUB_ENV
+        shell: bash
+        run: |
+          PROMPT='${{ github.event.inputs.prompt }}'
+          if [ -z "$PROMPT" ]; then
+            PROMPT='Diagnostic quotidien : état réseau & marché.'
+          fi
+          # Write multi-line prompt safely
+          {
+            echo 'SIGMA_PROMPT<<EOF'
+            echo "$PROMPT"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+
+          MODEL='${{ github.event.inputs.model_name }}'
+          if [ -z "$MODEL" ]; then MODEL='gpt2'; fi
+          echo "SIGMA_LLM_MODEL=$MODEL" >> "$GITHUB_ENV"
 
       - name: Ensure defaults (configs/state/reports)
         shell: python
@@ -70,7 +85,7 @@ jobs:
                     [0.31, 0.48, 1.0, 0.58],
                     [0.55, 0.63, 0.58, 1.0]
                   ]
-              }, open(params_path,"w"), indent=2)
+              }, open(params_path,"w"), indent=2, ensure_ascii=False)
           metrics_path = pathlib.Path(ST)/"last_metrics.json"
           if not metrics_path.exists():
               json.dump({
@@ -80,7 +95,7 @@ jobs:
                   "rhoA": 0.0,
                   "dt": 0.1,
                   "timestamp": int(time.time())
-              }, open(metrics_path,"w"), indent=2)
+              }, open(metrics_path,"w"), indent=2, ensure_ascii=False)
 
       - name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
         id: exec_sigma
@@ -100,13 +115,17 @@ jobs:
           spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
           mod  = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
-          prompt = os.getenv("SIGMA_PROMPT")
-          model  = os.getenv("SIGMA_LLM_MODEL")
+
+          prompt = os.getenv("SIGMA_PROMPT", "Diagnostic quotidien : état réseau & marché.")
+          model  = os.getenv("SIGMA_LLM_MODEL", "gpt2")
+
           if not hasattr(mod, "SigmaLLM"):
               print("::error::Classe SigmaLLM introuvable dans le script.")
               sys.exit(3)
+
           agent = mod.SigmaLLM(model_name=model)
           text  = agent.generate(f"Human: {prompt}\nAI:")
+
           RP = os.getenv("SIGMA_REPORTS_DIR","reports")
           pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
           ci_report = {
@@ -117,6 +136,7 @@ jobs:
           }
           with open(f"{RP}/sigma_llm_ci_report.json","w") as f:
               json.dump(ci_report, f, indent=2, ensure_ascii=False)
+
           inv_path = f"{RP}/sigma_llm_last_report.json"
           inv_errors = 0
           if os.path.exists(inv_path):
@@ -125,9 +145,11 @@ jobs:
                   inv_errors = len(data.get("invariants",{}).get("errors",[]))
               except Exception as e:
                   print(f"::warning::Impossible de lire {inv_path}: {e}")
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
               print(f"inv_errors={inv_errors}", file=gh)
 
+      # BONUS #1: Résumé lisible dans l’onglet Summary
       - name: Pretty-print report to job summary
         shell: bash
         run: |
@@ -146,6 +168,7 @@ jobs:
           echo "Invariant errors detected by Sigma-LLM. Failing CI."
           exit 1
 
+      # BONUS #2: Artefacts (report + last_report)
       - name: Upload Sigma-LLM report
         uses: actions/upload-artifact@v4
         with:
