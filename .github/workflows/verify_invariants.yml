@@ -46,114 +46,55 @@ jobs:
           fi
           pip install "numpy>=1.26" "scipy>=1.11" "networkx>=3.2" pandas
 
-      - name: Ensure defaults & reports dir (Python, no heredocs)
+      - name: Ensure defaults & reports dir (Python)
         run: |
-          python - <<'PY'
-          import os, json, time
-          os.makedirs("reports", exist_ok=True)
-          os.makedirs("configs", exist_ok=True)
-          os.makedirs("state",   exist_ok=True)
+          python -c 'import os,json
+os.makedirs("reports",exist_ok=True); os.makedirs("configs",exist_ok=True); os.makedirs("state",exist_ok=True)
+p="configs/sigma_params.json"
+if not os.path.exists(p):
+    json.dump({"alpha":0.30,"lambda":0.20,"gamma":0.006,"mu":0.20,"beta":0.0,
+               "theta":[0.52,0.47,0.41,0.50],
+               "W":[[1.00,0.42,0.31,0.55],[0.42,1.00,0.48,0.63],[0.31,0.48,1.00,0.58],[0.55,0.63,0.58,1.00]]},
+              open(p,"w"), indent=2)
+m="state/last_metrics.json"
+if not os.path.exists(m):
+    json.dump({"sigma_percentage":0.0,"final_C":[0,0,0,0],"final_dC":[0,0,0,0],"rhoA":0.0,"dt":0.1,"timestamp":"init"},
+              open(m,"w"), indent=2)'
 
-          params_path = "configs/sigma_params.json"
-          metrics_path = "state/last_metrics.json"
-
-          if not os.path.exists(params_path):
-              params = {
-                  "alpha": 0.30,
-                  "lambda": 0.20,
-                  "gamma": 0.006,
-                  "mu": 0.20,
-                  "beta": 0.0,
-                  "theta": [0.52, 0.47, 0.41, 0.50],
-                  "W": [
-                      [1.00, 0.42, 0.31, 0.55],
-                      [0.42, 1.00, 0.48, 0.63],
-                      [0.31, 0.48, 1.00, 0.58],
-                      [0.55, 0.63, 0.58, 1.00],
-                  ],
-              }
-              with open(params_path, "w") as f:
-                  json.dump(params, f, indent=2)
-
-          if not os.path.exists(metrics_path):
-              metrics = {
-                  "sigma_percentage": 0.0,
-                  "final_C":  [0.0, 0.0, 0.0, 0.0],
-                  "final_dC": [0.0, 0.0, 0.0, 0.0],
-                  "rhoA": 0.0,
-                  "dt": 0.1,
-                  "timestamp": "init"
-              }
-              with open(metrics_path, "w") as f:
-                  json.dump(metrics, f, indent=2)
-          PY
-
-      - name: Run invariant checks
+      - name: Run invariant checks (prefer custom script)
         run: |
           if [ -f scripts/verify_invariants.py ]; then
             python scripts/verify_invariants.py
           else
-            echo "[WARN] scripts/verify_invariants.py not found — running lightweight inline checks"
-            python - <<'PY'
-            import json, sys, os, math
-
-            # charge params
-            with open("configs/sigma_params.json") as f:
-                params = json.load(f)
-
-            hard_errors = []
-            warnings = []
-
-            # clés requises
-            for k in ("alpha","lambda","gamma","mu","beta","theta","W"):
-                if k not in params:
-                    hard_errors.append(f"Missing key '{k}' in configs/sigma_params.json")
-
-            # theta: 4 scalaires dans [0,1]
-            th = params.get("theta", [])
-            if not (isinstance(th, list) and len(th) == 4 and all(isinstance(x,(int,float)) for x in th)):
-                hard_errors.append("theta must be a list of 4 numbers")
-            else:
-                if not all(0.0 <= float(x) <= 1.0 for x in th):
-                    warnings.append("theta values should be in [0,1]")
-
-            # W: 4x4 et (quasi) symétrique
-            W = params.get("W", [])
-            if not (isinstance(W, list) and len(W) == 4 and all(isinstance(r, list) and len(r) == 4 for r in W)):
-                hard_errors.append("W must be a 4x4 list matrix")
-            else:
-                sym_ok = True
-                for i in range(4):
-                    for j in range(4):
-                        if abs(float(W[i][j]) - float(W[j][i])) > 1e-6:
-                            sym_ok = False
-                            break
-                    if not sym_ok:
-                        break
-                if not sym_ok:
-                    hard_errors.append("W must be symmetric")
-
-            # petit gain (alpha + mu + gamma) comme garde-fou simple
-            ag = float(params.get("alpha",0)) + float(params.get("mu",0)) + float(params.get("gamma",0))
-            if ag > 1.0:
-                warnings.append(f"small_gain (alpha+mu+gamma) = {ag:.3f} is high (>1.0)")
-
-            report = {
-              "params_file": os.path.abspath("configs/sigma_params.json"),
-              "metrics_file": os.path.abspath("state/last_metrics.json"),
-              "small_gain": ag,
-              "warnings": warnings,
-              "hard_errors": hard_errors
-            }
-
-            os.makedirs("reports", exist_ok=True)
-            with open("reports/invariants_report.json", "w") as f:
-                json.dump(report, f, indent=2)
-
-            print(f"[INVARIANTS][{'OK' if not hard_errors else 'FAIL'}]")
-            if hard_errors:
-                sys.exit(1)
-            PY
+            python -c 'import json,sys,os,math
+params=json.load(open("configs/sigma_params.json"))
+hard=[]; warn=[]
+for k in ("alpha","lambda","gamma","mu","beta","theta","W"):
+    if k not in params: hard.append(f"Missing key {k!r} in configs/sigma_params.json")
+th=params.get("theta",[])
+if not (isinstance(th,list) and len(th)==4 and all(isinstance(x,(int,float)) for x in th)):
+    hard.append("theta must be a list of 4 numbers")
+else:
+    if not all(0.0<=float(x)<=1.0 for x in th): warn.append("theta values should be in [0,1]")
+W=params.get("W",[])
+if not (isinstance(W,list) and len(W)==4 and all(isinstance(r,list) and len(r)==4 for r in W)):
+    hard.append("W must be a 4x4 list matrix")
+else:
+    sym=True
+    for i in range(4):
+        for j in range(4):
+            if abs(float(W[i][j])-float(W[j][i]))>1e-6: sym=False; break
+        if not sym: break
+    if not sym: hard.append("W must be symmetric")
+ag=float(params.get("alpha",0))+float(params.get("mu",0))+float(params.get("gamma",0))
+if ag>1.0: warn.append(f"small_gain (alpha+mu+gamma) = {ag:.3f} is high (>1.0)")
+report={"params_file":os.path.abspath("configs/sigma_params.json"),
+        "metrics_file":os.path.abspath("state/last_metrics.json"),
+        "small_gain":ag,"warnings":warn,"hard_errors":hard}
+os.makedirs("reports",exist_ok=True)
+json.dump(report,open("reports/invariants_report.json","w"),indent=2)
+print(f"[INVARIANTS][{'OK' if not hard else 'FAIL'}]")
+sys.exit(1 if hard else 0)'
           fi
 
       - name: Summarize report
@@ -161,14 +102,7 @@ jobs:
         run: |
           if [ -f reports/invariants_report.json ]; then
             echo "### Invariants report ###" >> $GITHUB_STEP_SUMMARY
-            python - <<'PY'
-            import json
-            with open("reports/invariants_report.json") as f:
-                data = json.load(f)
-            print("```json")
-            print(json.dumps(data, indent=2))
-            print("```")
-            PY
+            python -c 'import json,sys; d=json.load(open("reports/invariants_report.json")); print("```json"); print(json.dumps(d,indent=2)); print("```")' >> $GITHUB_STEP_SUMMARY
           else
             echo "_No invariants report found._" >> $GITHUB_STEP_SUMMARY
           fi
