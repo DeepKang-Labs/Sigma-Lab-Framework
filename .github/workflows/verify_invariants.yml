@@ -1,8 +1,8 @@
 name: Verify Invariants
 
 on:
-  workflow_dispatch: {}        # run manually from the Actions tab
-  push:                        # also run on pushes that can break invariants
+  workflow_dispatch: {}
+  push:
     branches: [ main ]
     paths:
       - "configs/**"
@@ -11,7 +11,7 @@ on:
       - "scripts/**.py"
       - ".github/workflows/verify_invariants.yml"
   schedule:
-    - cron: "23 2 * * *"      # daily at 02:23 UTC
+    - cron: "23 2 * * *"
 
 permissions:
   contents: read
@@ -44,13 +44,11 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
-          # Safety net: assure les libs de base
           pip install "numpy>=1.26" "scipy>=1.11" "networkx>=3.2" pandas
 
       - name: Ensure defaults & reports dir
         run: |
           mkdir -p reports configs state
-          # Paramètres par défaut si absents, avec clés ASCII pour éviter les \u03xx
           test -f configs/sigma_params.json || cat > configs/sigma_params.json <<'EOF'
           {
             "alpha": 0.30,
@@ -67,7 +65,6 @@ jobs:
             ]
           }
           EOF
-          # Metrics minimal pour que le script ait une base
           test -f state/last_metrics.json || cat > state/last_metrics.json <<'EOF'
           {
             "sigma_percentage": 0.0,
@@ -87,16 +84,19 @@ jobs:
             echo "[WARN] scripts/verify_invariants.py not found — creating a lightweight check."
             python - <<'PY'
 import json, sys, os
+
 params = json.load(open("configs/sigma_params.json"))
 hard_errors = []
 for k in ("alpha","lambda","gamma","mu","beta","theta","W"):
-    if k not in params: hard_errors.append(f"Missing key '{k}' in configs/sigma_params.json")
+    if k not in params:
+        hard_errors.append(f"Missing key '{k}' in configs/sigma_params.json")
+
 report = {
-  "params_file": os.path.abspath("configs/sigma_params.json"),
-  "metrics_file": os.path.abspath("state/last_metrics.json"),
-  "small_gain": float(params.get("alpha",0)+params.get("mu",0)) if isinstance(params.get("alpha",0), (int,float)) else 0,
-  "warnings": [],
-  "hard_errors": hard_errors
+    "params_file": os.path.abspath("configs/sigma_params.json"),
+    "metrics_file": os.path.abspath("state/last_metrics.json"),
+    "small_gain": float(params.get("alpha",0)+params.get("mu",0)) if isinstance(params.get("alpha",0),(int,float)) else 0,
+    "warnings": [],
+    "hard_errors": hard_errors
 }
 os.makedirs("reports", exist_ok=True)
 json.dump(report, open("reports/invariants_report.json","w"))
@@ -112,9 +112,9 @@ PY
           if [ -f reports/invariants_report.json ]; then
             echo "### Invariants report" >> $GITHUB_STEP_SUMMARY
             python - <<'PY'
-import json, os
-p = "reports/invariants_report.json"
-data = json.load(open(p))
+import json
+with open("reports/invariants_report.json") as f:
+    data = json.load(f)
 print("```json")
 print(json.dumps(data, indent=2))
 print("```")
