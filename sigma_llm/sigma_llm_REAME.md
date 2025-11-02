@@ -23,3 +23,37 @@
 
 ## 🧠 Diagramme conceptuel
 
+┌──────────────────────┐
+│ Sigma-LLM │
+│ ──────────────── │
+│ Subjectivity S(t) │
+│ Objectivity O(t) │
+│ Meta-Coherence Δcoh │
+│ Invariants + Policy │
+└─────────┬────────────┘
+│
+↕ Interaction via
+configs/, state/, reports/
+│
+┌─────────▼──────────┐
+│ Sigma-Lab Core │
+│ Autotune · CI/CD · I/O │
+└────────────────────┘
+
+yaml
+Copy code
+
+---
+
+## ⚙️ Exécution locale
+
+```bash
+python sigma_llm_complete.py
+Puis interagis directement en CLI :
+
+vbnet
+Copy code
+Sigma-LLM ready. Type your prompt. Ctrl+C to quit.
+
+Human: Bonjour Sigma.
+AI: Bonjour. Mes paramètres Σ sont stables. Δcoh = 0.0021.
