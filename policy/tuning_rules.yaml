@@ -1,0 +1,9 @@
+rules:
+  - name: adjust_lambda_by_sigma
+    when_frac_sigma_lt: 0.25
+    action: "lambda *= 1.05"
+  - name: adjust_lambda_by_sigma_high
+    when_frac_sigma_gt: 0.60
+    action: "lambda *= 0.98"
+notes: |
+  Soft rules; engine invariants (petit-gain, bounds, CFL) take precedence.
