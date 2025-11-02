@@ -1,31 +1,96 @@
-name: Run Sigma-LLM Reflexive Agent
+name: Run Sigma-LLM (one-shot)
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "15 */6 * * *"
+    - cron: "17 4 * * *"   # quotidien à 04:17 UTC
 
 permissions:
   contents: read
 
+concurrency:
+  group: sigma-llm-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    env:
+      PYTHONUNBUFFERED: "1"
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          # Torch CPU + Transformers (tiny-gpt2 est très rapide)
+          pip install "torch>=2.2.0" --index-url https://download.pytorch.org/whl/cpu
+          pip install "transformers>=4.41" tokenizers
 
-      - name: Execute Sigma-LLM Reflexive Agent
-        env:
-          SIGMA_CONFIGS_DIR: configs
-          SIGMA_STATE_DIR: state
-          SIGMA_REPORTS_DIR: reports
+      - name: Ensure defaults (configs/state/reports)
         run: |
           mkdir -p configs state reports
-          python sigma_llm_complete.py
+          # Params défaut si absent (ASCII keys)
+          if [ ! -f configs/sigma_params.json ]; then
+            cat > configs/sigma_params.json <<'JSON'
+            {
+              "alpha": 0.30,
+              "lambda": 0.20,
+              "gamma": 0.006,
+              "mu": 0.205,
+              "beta": 0.0,
+              "theta": [0.52, 0.47, 0.41, 0.50],
+              "W": [
+                [1.0, 0.42, 0.31, 0.55],
+                [0.42, 1.0, 0.48, 0.63],
+                [0.31, 0.48, 1.0, 0.58],
+                [0.55, 0.63, 0.58, 1.0]
+              ]
+            }
+            JSON
+          fi
+          # Metrics min si absent
+          if [ ! -f state/last_metrics.json ]; then
+            cat > state/last_metrics.json <<'JSON'
+            {
+              "final_C": [0.55, 0.48, 0.52, 0.50],
+              "frac_sigma": 0.0,
+              "rhoA": 2.35,
+              "dt": 0.1,
+              "timestamp": "init"
+            }
+            JSON
+          fi
+
+      - name: Execute Sigma-LLM (CI-safe, one-shot)
+        run: |
+          SIGMA_PROMPT="Diagnostic quotidien: état réseau & marché" \
+          SIGMA_LLM_MODEL="sshleifer/tiny-gpt2" \
+          python sigmacomplettllm.py --prompt "Bonjour Sigma, publie ton état S(t), O(t), Δcoh et éventuels warnings."
+
+      - name: Fail on invariant errors
+        run: |
+          python - <<'PY'
+          import json, sys
+          with open("reports/sigma_llm_last_report.json") as f:
+              rep = json.load(f)
+          errs = rep.get("invariants",{}).get("errors",[])
+          print("Invariant errors:", errs)
+          sys.exit(1 if errs else 0)
+          PY
+
+      - name: Upload Sigma-LLM report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sigma_llm_report_${{ github.run_id }}
+          path: |
+            reports/sigma_llm_last_report.json
+            reports/sigma_llm_provenance.jsonl
+          if-no-files-found: warn
