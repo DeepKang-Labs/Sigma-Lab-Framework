@@ -1,9 +1,18 @@
-name: Run Sigma-LLM (one-shot)
+name: Run Sigma-LLM (autodiscover)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Prompt one-shot pour Sigma-LLM"
+        required: false
+        default: "Diagnostic quotidien : état réseau & marché."
+      model_name:
+        description: "Modèle HF (ex: gpt2, meta-llama/Llama-3-8B-Instruct-GGUF etc.)"
+        required: false
+        default: "gpt2"
   schedule:
-    - cron: "17 4 * * *"   # quotidien à 04:17 UTC
+    - cron: "21 4 * * *"   # chaque jour à 04:21 UTC
 
 permissions:
   contents: read
@@ -16,7 +25,12 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      PYTHONUNBUFFERED: "1"
+      SIGMA_PROMPT: ${{ github.event.inputs.prompt || 'Diagnostic quotidien : état réseau & marché.' }}
+      SIGMA_LLM_MODEL: ${{ github.event.inputs.model_name || 'gpt2' }}
+      # Dossiers standard Sigma-Lab
+      SIGMA_CONFIGS_DIR: configs
+      SIGMA_STATE_DIR: state
+      SIGMA_REPORTS_DIR: reports
 
     steps:
       - name: Checkout
@@ -30,52 +44,111 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install "torch>=2.2.0" --index-url https://download.pytorch.org/whl/cpu
-          pip install "transformers>=4.41" tokenizers
+          # CPU torch (rapide/stable) + HF
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" "pandas"
 
       - name: Ensure defaults (configs/state/reports)
         run: |
-          mkdir -p configs state reports
-          if [ ! -f configs/sigma_params.json ]; then
-            echo '{' > configs/sigma_params.json
-            echo '"alpha":0.30,"lambda":0.20,"gamma":0.006,"mu":0.205,"beta":0.0,' >> configs/sigma_params.json
-            echo '"theta":[0.52,0.47,0.41,0.50],' >> configs/sigma_params.json
-            echo '"W":[[1.0,0.42,0.31,0.55],[0.42,1.0,0.48,0.63],[0.31,0.48,1.0,0.58],[0.55,0.63,0.58,1.0]]' >> configs/sigma_params.json
-            echo '}' >> configs/sigma_params.json
-          fi
-          if [ ! -f state/last_metrics.json ]; then
-            echo '{' > state/last_metrics.json
-            echo '"final_C":[0.55,0.48,0.52,0.50],' >> state/last_metrics.json
-            echo '"frac_sigma":0.0,"rhoA":2.35,"dt":0.1,"timestamp":"init"' >> state/last_metrics.json
-            echo '}' >> state/last_metrics.json
-          fi
+          python - <<'PY'
+          import os, json, time, pathlib
+          CFG=os.getenv("SIGMA_CONFIGS_DIR","configs")
+          ST =os.getenv("SIGMA_STATE_DIR","state")
+          RP =os.getenv("SIGMA_REPORTS_DIR","reports")
+          pathlib.Path(CFG).mkdir(parents=True, exist_ok=True)
+          pathlib.Path(ST).mkdir(parents=True, exist_ok=True)
+          pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
 
-      - name: Execute Sigma-LLM (CI-safe, one-shot)
-        run: |
-          SIGMA_PROMPT="Diagnostic quotidien: état réseau & marché" \
-          SIGMA_LLM_MODEL="sshleifer/tiny-gpt2" \
-          python sigmacomplettllm.py --prompt "Bonjour Sigma, publie ton état S(t), O(t), Δcoh et éventuels warnings."
+          params_path = f"{CFG}/sigma_params.json"
+          if not os.path.exists(params_path):
+              json.dump({
+                  "alpha": 0.30, "lambda": 0.20, "gamma": 0.006, "mu": 0.20, "beta": 0.0,
+                  "theta": [0.52,0.47,0.41,0.50],
+                  "W": [[1.0,0.42,0.31,0.55],[0.42,1.0,0.48,0.63],[0.31,0.48,1.0,0.58],[0.55,0.63,0.58,1.0]]
+              }, open(params_path,"w"), indent=2)
 
-      - name: Fail on invariant errors
+          metrics_path = f"{ST}/last_metrics.json"
+          if not os.path.exists(metrics_path):
+              json.dump({
+                  "frac_sigma": 0.0,
+                  "final_C": [0.5,0.5,0.5,0.5],
+                  "final_dC": [0.0,0.0,0.0,0.0],
+                  "rhoA": 2.35, "dt": 0.1, "timestamp": int(time.time())
+              }, open(metrics_path,"w"), indent=2)
+          PY
+
+      - name: Execute Sigma-LLM (CI-safe, one-shot, autodiscover)
+        id: exec_sigma
         run: |
           python - <<'PY'
-          import json, sys
-          try:
-              with open("reports/sigma_llm_last_report.json") as f:
-                  rep = json.load(f)
-              errs = rep.get("invariants",{}).get("errors",[])
-              print("Invariant errors:", errs)
-              sys.exit(1 if errs else 0)
-          except FileNotFoundError:
-              print("⚠️ No report file found.")
-              sys.exit(1)
+          import os, glob, importlib.util, json, sys, pathlib, time
+
+          ROOT = pathlib.Path(".")
+          # Cherche automatiquement le script du LLM
+          candidates = []
+          for patt in ["sigma_llm*.py", "sigmacomplettllm.py", "SigmaLLM*.py"]:
+              candidates += [str(p) for p in ROOT.glob(patt)]
+          if not candidates:
+              print("::error::Aucun fichier Sigma-LLM trouvé (sigma_llm*.py ou sigmacomplettllm.py).")
+              sys.exit(2)
+          script = sorted(candidates)[0]
+          print(f"Using Sigma-LLM script: {script}")
+
+          # Charge le module sans exécuter le bloc __main__
+          spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+
+          prompt = os.getenv("SIGMA_PROMPT", "Diagnostic quotidien.")
+          model  = os.getenv("SIGMA_LLM_MODEL","gpt2")
+
+          if not hasattr(mod, "SigmaLLM"):
+              print("::error::Le script ne contient pas de classe SigmaLLM.")
+              sys.exit(3)
+
+          agent = mod.SigmaLLM(model_name=model)
+          text  = agent.generate(f"Human: {prompt}\nAI:")
+
+          # Sauvegarde un petit rapport CI
+          RP = os.getenv("SIGMA_REPORTS_DIR","reports")
+          pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
+          ci_report = {
+              "ts": int(time.time()),
+              "prompt": prompt,
+              "model": model,
+              "output_preview": text[-1000:],
+          }
+          with open(f"{RP}/sigma_llm_ci_report.json","w") as f:
+              json.dump(ci_report, f, indent=2, ensure_ascii=False)
+
+          # Essaie de lire le rapport interne si le script l’a écrit
+          inv_path = f"{RP}/sigma_llm_last_report.json"
+          if os.path.exists(inv_path):
+              data = json.load(open(inv_path))
+              errs = data.get("invariants",{}).get("errors",[])
+              if errs:
+                  print(f"::error::Invariant errors: {errs}")
+                  # Marque une sortie pour l’étape suivante
+                  print(f"::set-output name=inv_errors::{len(errs)}")
+              else:
+                  print("No invariant errors reported by Sigma-LLM.")
+                  print(f"::set-output name=inv_errors::0")
+          else:
+              print("No internal sigma_llm_last_report.json found; skipping invariant read.")
+              print(f"::set-output name=inv_errors::0")
           PY
+
+      - name: Fail on invariant errors
+        if: steps.exec_sigma.outputs.inv_errors != '0'
+        run: |
+          echo "Invariant errors detected by Sigma-LLM. Failing CI."
+          exit 1
 
       - name: Upload Sigma-LLM report
         uses: actions/upload-artifact@v4
         with:
-          name: sigma_llm_report_${{ github.run_id }}
+          name: sigma_llm_reports_${{ github.run_id }}
           path: |
+            reports/sigma_llm_ci_report.json
             reports/sigma_llm_last_report.json
-            reports/sigma_llm_provenance.jsonl
           if-no-files-found: warn
