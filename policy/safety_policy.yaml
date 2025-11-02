@@ -1,0 +1,16 @@
+immutable_paths:
+  - "engine/**"
+  - ".github/workflows/verify_invariants.yml"
+
+bounds:
+  alpha:   [0.10, 0.40]
+  beta:    [0.00, 0.20]
+  gamma:   [0.002, 0.020]
+  mu:      [0.10, 0.35]
+  lambda:  [0.12, 0.30]
+
+constraints:
+  petit_gain_max: 0.40
+  cfl_safety: 0.80
+  max_param_delta_rate: 0.05
+  require_pr_review_for_rules: true
