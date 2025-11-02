@@ -25,8 +25,11 @@ jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      SIGMA_PROMPT: ${{ github.event.inputs.prompt || 'Diagnostic quotidien : état réseau & marché.' }}
-      SIGMA_LLM_MODEL: ${{ github.event.inputs.model_name || 'gpt2' }}
+      SIGMA_PROMPT: ${{ github.event.inputs.prompt }}
+      SIGMA_LLM_MODEL: ${{ github.event.inputs.model_name }}
+      # Valeurs par défaut si aucun input fourni
+      DEFAULT_PROMPT: "Diagnostic quotidien : état réseau & marché."
+      DEFAULT_MODEL: "gpt2"
       # Dossiers standard Sigma-Lab
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
@@ -44,7 +47,6 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          # CPU torch (rapide/stable) + HF
           pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" "pandas"
 
@@ -84,7 +86,6 @@ jobs:
           import os, glob, importlib.util, json, sys, pathlib, time
 
           ROOT = pathlib.Path(".")
-          # Cherche automatiquement le script du LLM
           candidates = []
           for patt in ["sigma_llm*.py", "sigmacomplettllm.py", "SigmaLLM*.py"]:
               candidates += [str(p) for p in ROOT.glob(patt)]
@@ -94,13 +95,12 @@ jobs:
           script = sorted(candidates)[0]
           print(f"Using Sigma-LLM script: {script}")
 
-          # Charge le module sans exécuter le bloc __main__
           spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
           mod = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
 
-          prompt = os.getenv("SIGMA_PROMPT", "Diagnostic quotidien.")
-          model  = os.getenv("SIGMA_LLM_MODEL","gpt2")
+          prompt = os.getenv("SIGMA_PROMPT") or os.getenv("DEFAULT_PROMPT")
+          model  = os.getenv("SIGMA_LLM_MODEL") or os.getenv("DEFAULT_MODEL")
 
           if not hasattr(mod, "SigmaLLM"):
               print("::error::Le script ne contient pas de classe SigmaLLM.")
@@ -109,7 +109,6 @@ jobs:
           agent = mod.SigmaLLM(model_name=model)
           text  = agent.generate(f"Human: {prompt}\nAI:")
 
-          # Sauvegarde un petit rapport CI
           RP = os.getenv("SIGMA_REPORTS_DIR","reports")
           pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
           ci_report = {
@@ -121,14 +120,12 @@ jobs:
           with open(f"{RP}/sigma_llm_ci_report.json","w") as f:
               json.dump(ci_report, f, indent=2, ensure_ascii=False)
 
-          # Essaie de lire le rapport interne si le script l’a écrit
           inv_path = f"{RP}/sigma_llm_last_report.json"
           if os.path.exists(inv_path):
               data = json.load(open(inv_path))
               errs = data.get("invariants",{}).get("errors",[])
               if errs:
                   print(f"::error::Invariant errors: {errs}")
-                  # Marque une sortie pour l’étape suivante
                   print(f"::set-output name=inv_errors::{len(errs)}")
               else:
                   print("No invariant errors reported by Sigma-LLM.")
