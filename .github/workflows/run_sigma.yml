@@ -1,0 +1,26 @@
+name: Run Sigma Dynamics
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Validate params & policy
+        run: python scripts/validate_params_and_policy.py
+      - name: Execute Sigma
+        run: python -m pipelines.run_sigma
+      - name: Autotune (params only)
+        run: python -m pipelines.autotune_params
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sigma_run_${{ github.run_id }}
+          path: |
+            state/last_metrics.json
+            configs/sigma_params.json
