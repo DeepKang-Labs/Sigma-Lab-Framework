@@ -5,3 +5,9 @@ requests==2.32.3
 PyYAML==6.0.2
 python-multipart==0.0.9
 pydantic==2.9.2
+torch>=2.0
+transformers>=4.35
+numpy>=1.26
+pandas
+accelerate
+gradio
