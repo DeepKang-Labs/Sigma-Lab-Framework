@@ -41,7 +41,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
-          # Filets de sécurité (au cas où requirements.txt ne pinne pas tout)
+          # Filets de sécurité si requirements.txt n’épingle pas tout
           pip install "numpy>=1.26" "scipy>=1.11" "networkx>=3.2" pandas matplotlib
 
       - name: Ensure core dirs present
@@ -50,24 +50,32 @@ jobs:
           # Fichiers par défaut s'ils n'existent pas (évite les plantages)
           test -f configs/sigma_params.json || cat > configs/sigma_params.json <<'EOF'
           {
-            "α": 0.30,
-            "λ": 0.20,
-            "γ": 0.006,
-            "μ": 0.20,
-            "β": 0.0
+            "alpha": 0.30,
+            "lambda": 0.20,
+            "gamma": 0.006,
+            "mu": 0.20,
+            "beta": 0.0,
+            "theta": [0.52, 0.47, 0.41, 0.50],
+            "W": [
+              [1.0, 0.42, 0.31, 0.55],
+              [0.42, 1.0, 0.48, 0.63],
+              [0.31, 0.48, 1.0, 0.58],
+              [0.55, 0.63, 0.58, 1.0]
+            ]
           }
           EOF
           test -f state/last_metrics.json || cat > state/last_metrics.json <<'EOF'
           {
-            "sigma_percentage": 35.0,
-            "stability": 0.7,
-            "resilience": 3.0,
-            "timestamp": "$(date +%s)"
+            "sigma_percentage": 0.0,
+            "final_C": [0.0, 0.0, 0.0, 0.0],
+            "final_dC": [0.0, 0.0, 0.0, 0.0],
+            "rhoA": 0.0,
+            "dt": 0.1,
+            "timestamp": "init"
           }
           EOF
 
       - name: Validate params & policy
-        # Optionnel : si ton repo n'a pas ce script, garde la commande en no-op
         run: |
           if [ -f scripts/validate_params_and_policy.py ]; then
             python scripts/validate_params_and_policy.py
@@ -83,15 +91,25 @@ jobs:
 
       - name: Autotune v2 (gradient + SPSA)
         run: |
+          # NOTE: garde le nom du module que TU utilises dans le repo
+          # (autotune_params_v2 ou autotune_paramsv2). Ici on suit ton dernier choix.
           python -m pipelines.autotune_params_v2
 
       - name: Promote next params if present
         run: |
           if [ -f configs/sigma_params_next.json ]; then
-            cp configs/sigma_params_next.json configs/sigma_params.json
+            mv configs/sigma_params_next.json configs/sigma_params.json
             echo "[INFO] Promoted configs/sigma_params_next.json -> configs/sigma_params.json"
           else
             echo "[INFO] No next params to promote."
+          fi
+
+      - name: Verify Invariants
+        run: |
+          if [ -f scripts/verify_invariants.py ]; then
+            python scripts/verify_invariants.py
+          else
+            echo "[WARN] scripts/verify_invariants.py not found — skipping invariants check"
           fi
 
       - name: Collect artifacts
@@ -103,6 +121,7 @@ jobs:
           [ -f state/last_metrics.json ] && cp state/last_metrics.json artifacts/ || true
           [ -f configs/sigma_params.json ] && cp configs/sigma_params.json artifacts/ || true
           [ -f configs/sigma_params_next.json ] && cp configs/sigma_params_next.json artifacts/ || true
+          [ -f reports/invariants_report.json ] && cp reports/invariants_report.json artifacts/ || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -110,3 +129,15 @@ jobs:
           name: sigma_reports_${{ github.run_id }}
           path: artifacts
           if-no-files-found: warn
+          retention-days: 30
+
+      - name: Summarize Results
+        run: |
+          echo "✅ Sigma pipeline run #${{ github.run_number }} completed."
+          if [ -f reports/invariants_report.json ]; then
+            echo "→ Invariants report archived."
+          fi
+          if [ -f state/last_metrics.json ]; then
+            echo "→ Metrics archived."
+          fi
+          echo "Artifacts: sigma_reports_${{ github.run_id }}"
