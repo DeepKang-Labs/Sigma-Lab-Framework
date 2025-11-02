@@ -30,43 +30,24 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          # Torch CPU + Transformers (tiny-gpt2 est très rapide)
           pip install "torch>=2.2.0" --index-url https://download.pytorch.org/whl/cpu
           pip install "transformers>=4.41" tokenizers
 
       - name: Ensure defaults (configs/state/reports)
         run: |
           mkdir -p configs state reports
-          # Params défaut si absent (ASCII keys)
           if [ ! -f configs/sigma_params.json ]; then
-            cat > configs/sigma_params.json <<'JSON'
-            {
-              "alpha": 0.30,
-              "lambda": 0.20,
-              "gamma": 0.006,
-              "mu": 0.205,
-              "beta": 0.0,
-              "theta": [0.52, 0.47, 0.41, 0.50],
-              "W": [
-                [1.0, 0.42, 0.31, 0.55],
-                [0.42, 1.0, 0.48, 0.63],
-                [0.31, 0.48, 1.0, 0.58],
-                [0.55, 0.63, 0.58, 1.0]
-              ]
-            }
-            JSON
+            echo '{' > configs/sigma_params.json
+            echo '"alpha":0.30,"lambda":0.20,"gamma":0.006,"mu":0.205,"beta":0.0,' >> configs/sigma_params.json
+            echo '"theta":[0.52,0.47,0.41,0.50],' >> configs/sigma_params.json
+            echo '"W":[[1.0,0.42,0.31,0.55],[0.42,1.0,0.48,0.63],[0.31,0.48,1.0,0.58],[0.55,0.63,0.58,1.0]]' >> configs/sigma_params.json
+            echo '}' >> configs/sigma_params.json
           fi
-          # Metrics min si absent
           if [ ! -f state/last_metrics.json ]; then
-            cat > state/last_metrics.json <<'JSON'
-            {
-              "final_C": [0.55, 0.48, 0.52, 0.50],
-              "frac_sigma": 0.0,
-              "rhoA": 2.35,
-              "dt": 0.1,
-              "timestamp": "init"
-            }
-            JSON
+            echo '{' > state/last_metrics.json
+            echo '"final_C":[0.55,0.48,0.52,0.50],' >> state/last_metrics.json
+            echo '"frac_sigma":0.0,"rhoA":2.35,"dt":0.1,"timestamp":"init"' >> state/last_metrics.json
+            echo '}' >> state/last_metrics.json
           fi
 
       - name: Execute Sigma-LLM (CI-safe, one-shot)
@@ -79,11 +60,15 @@ jobs:
         run: |
           python - <<'PY'
           import json, sys
-          with open("reports/sigma_llm_last_report.json") as f:
-              rep = json.load(f)
-          errs = rep.get("invariants",{}).get("errors",[])
-          print("Invariant errors:", errs)
-          sys.exit(1 if errs else 0)
+          try:
+              with open("reports/sigma_llm_last_report.json") as f:
+                  rep = json.load(f)
+              errs = rep.get("invariants",{}).get("errors",[])
+              print("Invariant errors:", errs)
+              sys.exit(1 if errs else 0)
+          except FileNotFoundError:
+              print("⚠️ No report file found.")
+              sys.exit(1)
           PY
 
       - name: Upload Sigma-LLM report
