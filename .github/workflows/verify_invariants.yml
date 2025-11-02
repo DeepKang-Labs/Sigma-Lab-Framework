@@ -44,16 +44,15 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
-          # Safety net
           pip install "numpy>=1.26" "scipy>=1.11" "networkx>=3.2" pandas
 
       - name: Ensure defaults & reports dir
         run: |
           mkdir -p reports configs state
 
-          # params par défaut si absent (clés ASCII)
+          # params par défaut si absent
           if [ ! -f configs/sigma_params.json ]; then
-            cat > configs/sigma_params.json <<'JSON'
+            cat <<'JSON' > configs/sigma_params.json
 {
   "alpha": 0.30,
   "lambda": 0.20,
@@ -73,7 +72,7 @@ JSON
 
           # métriques minimales si absent
           if [ ! -f state/last_metrics.json ]; then
-            cat > state/last_metrics.json <<'JSON'
+            cat <<'JSON' > state/last_metrics.json
 {
   "sigma_percentage": 0.0,
   "final_C": [0.0, 0.0, 0.0, 0.0],
@@ -99,36 +98,28 @@ with open("configs/sigma_params.json") as f:
 
 hard_errors = []
 
-# clés requises (ASCII)
+# clés requises
 for k in ("alpha","lambda","gamma","mu","beta","theta","W"):
     if k not in params:
         hard_errors.append(f"Missing key '{k}' in configs/sigma_params.json")
 
-# W doit être 4x4 et symétrique
+# Vérif W 4x4 et symétrique
 W = params.get("W", [])
 if not (isinstance(W, list) and len(W) == 4 and all(isinstance(r, list) and len(r) == 4 for r in W)):
     hard_errors.append("W must be a 4x4 list matrix")
 else:
     for i in range(4):
         for j in range(4):
-            try:
-                a = float(W[i][j]); b = float(W[j][i])
-            except Exception:
-                hard_errors.append("W entries must be numeric")
-                break
+            a, b = W[i][j], W[j][i]
             if abs(a - b) > 1e-6:
-                hard_errors.append("W must be symmetric (|W[i][j]-W[j][i]|<=1e-6)")
+                hard_errors.append("W must be symmetric")
                 break
 
-# small-gain (alpha + mu + gamma < 0.45)
 ag = float(params.get("alpha",0)) + float(params.get("mu",0)) + float(params.get("gamma",0))
-small_gain = ag
-
 report = {
   "params_file": os.path.abspath("configs/sigma_params.json"),
   "metrics_file": os.path.abspath("state/last_metrics.json"),
-  "small_gain": small_gain,
-  "warnings": [],
+  "small_gain": ag,
   "hard_errors": hard_errors
 }
 
@@ -148,7 +139,7 @@ PY
           if [ -f reports/invariants_report.json ]; then
             echo "### Invariants report ###" >> $GITHUB_STEP_SUMMARY
             python - <<'PY'
-import json, sys
+import json
 with open("reports/invariants_report.json") as f:
     data = json.load(f)
 print("```json")
