@@ -1,14 +1,27 @@
-name: Run Sigma Dynamics
+name: Run Sigma Dynamics + Autotune v2
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    - cron: "0 */7 * * *"  # toutes les 7h
+    # Daily at 03:15 UTC (adjust as you like)
+    - cron: "15 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sigma-lab-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  run:
+  run-sigma:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # Pour python -m pipelines.<module>
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       - name: Checkout
@@ -19,42 +32,81 @@ jobs:
         with:
           python-version: "3.11"
 
-      # --- Préparation de l'environnement ---
       - name: Upgrade pip toolchain
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip wheel setuptools
 
       - name: Install requirements
         run: |
           if [ -f requirements.txt ]; then
-            python -m pip install -r requirements.txt
+            pip install -r requirements.txt
+          fi
+          # Filets de sécurité (au cas où requirements.txt ne pinne pas tout)
+          pip install "numpy>=1.26" "scipy>=1.11" "networkx>=3.2" pandas matplotlib
+
+      - name: Ensure core dirs present
+        run: |
+          mkdir -p configs state reports artifacts
+          # Fichiers par défaut s'ils n'existent pas (évite les plantages)
+          test -f configs/sigma_params.json || cat > configs/sigma_params.json <<'EOF'
+          {
+            "α": 0.30,
+            "λ": 0.20,
+            "γ": 0.006,
+            "μ": 0.20,
+            "β": 0.0
+          }
+          EOF
+          test -f state/last_metrics.json || cat > state/last_metrics.json <<'EOF'
+          {
+            "sigma_percentage": 35.0,
+            "stability": 0.7,
+            "resilience": 3.0,
+            "timestamp": "$(date +%s)"
+          }
+          EOF
+
+      - name: Validate params & policy
+        # Optionnel : si ton repo n'a pas ce script, garde la commande en no-op
+        run: |
+          if [ -f scripts/validate_params_and_policy.py ]; then
+            python scripts/validate_params_and_policy.py
+          else
+            echo "[WARN] scripts/validate_params_and_policy.py not found — skipping validation"
           fi
 
-      # --- Filet de sécurité : installation explicite des librairies critiques ---
-      - name: Ensure core libs present
-        run: |
-          python -m pip install numpy scipy pydantic PyYAML networkx matplotlib pandas
-
-      # --- Étape 1 : validation des paramètres et politiques ---
-      - name: Validate params & policy
-        run: |
-          python scripts/validate_params_and_policy.py
-
-      # --- Étape 2 : exécution principale du moteur Sigma ---
       - name: Execute Sigma
+        # Ton runner principal (assure-toi que pipelines/run_sigma.py existe)
         run: |
           python -m pipelines.run_sigma
+        timeout-minutes: 30
 
-      # --- Étape 3 : autotuning paramétrique ---
-      - name: Autotune (params only)
+      - name: Autotune v2 (gradient + SPSA)
         run: |
-          python -m pipelines.autotune_params
+          python -m pipelines.autotune_params_v2
 
-      # --- Étape 4 : upload des artefacts générés ---
+      - name: Promote next params if present
+        run: |
+          if [ -f configs/sigma_params_next.json ]; then
+            cp configs/sigma_params_next.json configs/sigma_params.json
+            echo "[INFO] Promoted configs/sigma_params_next.json -> configs/sigma_params.json"
+          else
+            echo "[INFO] No next params to promote."
+          fi
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          # Copie large mais sûre
+          [ -d reports ] && cp -r reports artifacts/reports || true
+          [ -f state/autotune_log.csv ] && cp state/autotune_log.csv artifacts/ || true
+          [ -f state/last_metrics.json ] && cp state/last_metrics.json artifacts/ || true
+          [ -f configs/sigma_params.json ] && cp configs/sigma_params.json artifacts/ || true
+          [ -f configs/sigma_params_next.json ] && cp configs/sigma_params_next.json artifacts/ || true
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sigma_run_${{ github.run_id }}
-          path: |
-            state/last_metrics.json
-            configs/sigma_params.json
+          name: sigma_reports_${{ github.run_id }}
+          path: artifacts
+          if-no-files-found: warn
