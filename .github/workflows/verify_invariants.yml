@@ -11,7 +11,7 @@ on:
       - "scripts/**.py"
       - ".github/workflows/verify_invariants.yml"
   schedule:
-    - cron: "23 2 * * *"
+    - cron: "23 2 * * *"   # daily at 02:23 UTC
 
 permissions:
   contents: read
@@ -44,11 +44,14 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
+          # filets de sécurité
           pip install "numpy>=1.26" "scipy>=1.11" "networkx>=3.2" pandas
 
       - name: Ensure defaults & reports dir
         run: |
           mkdir -p reports configs state
+
+          # params par défaut avec clés ASCII (évite \u03xx)
           test -f configs/sigma_params.json || cat > configs/sigma_params.json <<'EOF'
           {
             "alpha": 0.30,
@@ -65,6 +68,8 @@ jobs:
             ]
           }
           EOF
+
+          # métriques minimales si absent
           test -f state/last_metrics.json || cat > state/last_metrics.json <<'EOF'
           {
             "sigma_percentage": 0.0,
@@ -81,29 +86,54 @@ jobs:
           if [ -f scripts/verify_invariants.py ]; then
             python scripts/verify_invariants.py
           else
-            echo "[WARN] scripts/verify_invariants.py not found — creating a lightweight check."
+            echo "[WARN] scripts/verify_invariants.py not found — lightweight fallback"
             python - <<'PY'
-import json, sys, os
+            import json, sys, os
 
-params = json.load(open("configs/sigma_params.json"))
-hard_errors = []
-for k in ("alpha","lambda","gamma","mu","beta","theta","W"):
-    if k not in params:
-        hard_errors.append(f"Missing key '{k}' in configs/sigma_params.json")
+            # charge params / metrics
+            with open("configs/sigma_params.json","r") as f:
+              params = json.load(f)
+            with open("state/last_metrics.json","r") as f:
+              metrics = json.load(f)
 
-report = {
-    "params_file": os.path.abspath("configs/sigma_params.json"),
-    "metrics_file": os.path.abspath("state/last_metrics.json"),
-    "small_gain": float(params.get("alpha",0)+params.get("mu",0)) if isinstance(params.get("alpha",0),(int,float)) else 0,
-    "warnings": [],
-    "hard_errors": hard_errors
-}
-os.makedirs("reports", exist_ok=True)
-json.dump(report, open("reports/invariants_report.json","w"))
-print("[INVARIANTS][{}]".format("OK" if not hard_errors else "FAIL"))
-print(json.dumps(report, indent=2))
-if hard_errors: sys.exit(1)
-PY
+            hard_errors = []
+            # clés invariantes requises côté params
+            for k in ("alpha","lambda","gamma","mu","beta","theta","W"):
+              if k not in params:
+                hard_errors.append(f"Missing key '{k}' in configs/sigma_params.json")
+
+            # contrôle types/dimensions simples
+            if "theta" in params and (not isinstance(params["theta"], list) or len(params["theta"]) != 4):
+              hard_errors.append("theta must be a list of length 4")
+            if "W" in params:
+              W = params["W"]
+              ok = isinstance(W, list) and len(W)==4 and all(isinstance(r, list) and len(r)==4 for r in W)
+              if not ok:
+                hard_errors.append("W must be a 4x4 matrix")
+
+            # small-gain simple (alpha+mu)
+            try:
+              small_gain = float(params.get("alpha",0)) + float(params.get("mu",0))
+            except Exception:
+              small_gain = 0.0
+
+            report = {
+              "params_file": os.path.abspath("configs/sigma_params.json"),
+              "metrics_file": os.path.abspath("state/last_metrics.json"),
+              "small_gain": small_gain,
+              "warnings": [],
+              "hard_errors": hard_errors
+            }
+
+            os.makedirs("reports", exist_ok=True)
+            with open("reports/invariants_report.json","w") as f:
+              json.dump(report, f, indent=2)
+
+            print("[INVARIANTS][{}]".format("OK" if not hard_errors else "FAIL"))
+            print(json.dumps(report, indent=2))
+            if hard_errors:
+              sys.exit(1)
+            PY
           fi
 
       - name: Summarize report
@@ -112,13 +142,12 @@ PY
           if [ -f reports/invariants_report.json ]; then
             echo "### Invariants report" >> $GITHUB_STEP_SUMMARY
             python - <<'PY'
-import json
-with open("reports/invariants_report.json") as f:
-    data = json.load(f)
-print("```json")
-print(json.dumps(data, indent=2))
-print("```")
-PY
+            import json
+            data = json.load(open("reports/invariants_report.json"))
+            print("```json")
+            print(json.dumps(data, indent=2))
+            print("```")
+            PY
           else
             echo "_No invariants report found._" >> $GITHUB_STEP_SUMMARY
           fi
@@ -129,4 +158,3 @@ PY
           name: invariants_${{ github.run_id }}
           path: reports/invariants_report.json
           if-no-files-found: warn
-          retention-days: 30
