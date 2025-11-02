@@ -3,7 +3,7 @@ name: Run Sigma Dynamics
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"  # toutes les 6h
+    - cron: "0 */7 * * *"  # toutes les 7h
 
 jobs:
   run:
@@ -19,35 +19,38 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Renforce l'environnement pour éviter les erreurs de modules manquants
+      # --- Préparation de l'environnement ---
       - name: Upgrade pip toolchain
         run: |
           python -m pip install --upgrade pip setuptools wheel
 
-      # Installe les deps déclarées
       - name: Install requirements
         run: |
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
 
-      # Filet de sécurité : force les libs clés même si requirements est incomplet ou cache instable
+      # --- Filet de sécurité : installation explicite des librairies critiques ---
       - name: Ensure core libs present
         run: |
-          python -m pip install numpy pydantic PyYAML networkx
+          python -m pip install numpy scipy pydantic PyYAML networkx matplotlib pandas
 
+      # --- Étape 1 : validation des paramètres et politiques ---
       - name: Validate params & policy
         run: |
           python scripts/validate_params_and_policy.py
 
+      # --- Étape 2 : exécution principale du moteur Sigma ---
       - name: Execute Sigma
         run: |
           python -m pipelines.run_sigma
 
+      # --- Étape 3 : autotuning paramétrique ---
       - name: Autotune (params only)
         run: |
           python -m pipelines.autotune_params
 
+      # --- Étape 4 : upload des artefacts générés ---
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
