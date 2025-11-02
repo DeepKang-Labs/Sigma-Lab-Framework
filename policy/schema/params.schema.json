@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SigmaParams",
+  "type": "object",
+  "required": ["alpha","beta","gamma","mu","lambda","theta","W"],
+  "properties": {
+    "alpha":  {"type":"number"},
+    "beta":   {"type":"number"},
+    "gamma":  {"type":"number"},
+    "mu":     {"type":"number"},
+    "lambda": {"type":"number"},
+    "theta":  {
+      "type":"array","items":{"type":"number"},"minItems":4,"maxItems":4
+    },
+    "W": {
+      "type":"array",
+      "items":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4},
+      "minItems":4,"maxItems":4
+    }
+  }
+}
