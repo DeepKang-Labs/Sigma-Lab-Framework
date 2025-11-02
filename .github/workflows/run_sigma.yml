@@ -1,24 +1,55 @@
 name: Run Sigma Dynamics
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */6 * * *"  # toutes les 6h
+
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
+
+      # Renforce l'environnement pour éviter les erreurs de modules manquants
+      - name: Upgrade pip toolchain
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      # Installe les deps déclarées
+      - name: Install requirements
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+
+      # Filet de sécurité : force les libs clés même si requirements est incomplet ou cache instable
+      - name: Ensure core libs present
+        run: |
+          python -m pip install numpy pydantic PyYAML networkx
+
       - name: Validate params & policy
-        run: python scripts/validate_params_and_policy.py
+        run: |
+          python scripts/validate_params_and_policy.py
+
       - name: Execute Sigma
-        run: python -m pipelines.run_sigma
+        run: |
+          python -m pipelines.run_sigma
+
       - name: Autotune (params only)
-        run: python -m pipelines.autotune_params
-      - uses: actions/upload-artifact@v4
+        run: |
+          python -m pipelines.autotune_params
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: sigma_run_${{ github.run_id }}
           path: |
