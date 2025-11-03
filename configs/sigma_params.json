@@ -8,36 +8,29 @@
   "theta": [0.52, 0.47, 0.41, 0.50],
 
   "W": [
-    [1.00, 0.42, 0.31, 0.55],
-    [0.42, 1.00, 0.48, 0.63],
-    [0.31, 0.48, 1.00, 0.58],
-    [0.55, 0.63, 0.58, 1.00]
+    [1.0, 0.42, 0.31, 0.55],
+    [0.42, 1.0, 0.48, 0.63],
+    [0.31, 0.48, 1.0, 0.58],
+    [0.55, 0.63, 0.58, 1.0]
   ],
 
   "nu": 0.35,
   "seuil_veto": 0.08,
 
-  /* ==== Nouveaux paramètres v3.1 ==== */
-
-  // Fuite de la subjectivité pour éviter la saturation de S(t)
   "subjectivity_decay": 0.002,
 
-  // Pondérations de l'objectivité O(t) = w_f*fact + w_c*coh + w_fb*feedback + w_p*policy
   "O_weights": [0.40, 0.25, 0.20, 0.15],
 
-  // Homéostasie: adaptation dynamique vers une entropie cible
   "homeostasis": {
     "temp":  { "min": 0.60, "max": 1.20, "target_entropy": 0.55, "k": 0.15 },
     "top_p": { "min": 0.70, "max": 0.98, "target_entropy": 0.55, "k": 0.20 }
   },
 
-  // Index sémantique persistant (mémoire à long terme légère)
   "semantic_index": {
     "max_items": 2000,
     "min_similarity_to_store": 0.15
   },
 
-  // Mémoire conversationnelle (nombre de tours conservés)
   "conversation_memory": {
     "max_turns": 100
   },
