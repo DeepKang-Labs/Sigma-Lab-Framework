@@ -22,7 +22,9 @@ from collections import deque
 import torch
 from torch import nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
+from sigma.core.rag import retrieve_topk
+from sigma.core.judge import judge_factuality, judge_coherence
+import torch.nn.functional as F
 # ---------------------- Dossiers / Fichiers -----------------------------------
 CONFIGS_DIR  = os.getenv("SIGMA_CONFIGS_DIR",  "configs")
 STATE_DIR    = os.getenv("SIGMA_STATE_DIR",    "state")
@@ -111,6 +113,94 @@ class ObjectivityEngine:
         comps = [factuality, coherence, feedback, policy]
         val = sum(w*self._clip01(c) for w,c in zip(self.w, comps))
         self.O = self._clip01(val); return self.O
+# ---------- 1) intention_estimator ----------
+    def intention_estimator(self, prompt: str) -> float:
+        """
+        Score [0,1] approximant 'intention explicite' vs flou.
+        Ici: heuristique simple (ponctuation, verbes performatifs, longueur).
+        Remplace facilement par un petit classif.
+        """
+        score = 0.0
+        L = len(prompt.strip())
+        if L > 40: score += 0.3
+        if "?" in prompt or ":" in prompt: score += 0.2
+        for kw in ["explique", "montre", "donne", "analyse", "compare", "résume"]:
+            if kw in prompt.lower(): score += 0.1
+        return max(0.0, min(1.0, score))
+
+    # ---------- 2) belief_state ----------
+    def belief_state(self, context: str) -> float:
+        """
+        Résume le contexte récent -> score de stabilité 'croyance interne'
+        Ici: entropie moyenne des derniers logits comme proxy inverse.
+        """
+        try:
+            inputs = self.tokenizer(context[-512:], return_tensors="pt")
+            with torch.no_grad():
+                out = self.model(**inputs)
+            # entropie logit du dernier token
+            logits = out.logits[:, -1, :]
+            probs = F.softmax(logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1).item()
+            # normaliser approx entre 0 et ~11 (vocab gpt2)
+            return max(0.0, min(1.0, 1.0 - entropy/11.0))
+        except Exception:
+            return 0.5
+
+    # ---------- 3) uncertainty_measure ----------
+    def uncertainty_measure(self, logits: torch.Tensor) -> float:
+        """
+        Incertitude = entropie de la distribution de sortie (plus c'est élevé, plus incertain).
+        Retourne (1 - entropie_norm) pour rester dans [0,1] = confiance.
+        """
+        try:
+            probs = F.softmax(logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1).mean().item()
+            return max(0.0, min(1.0, 1.0 - entropy/11.0))
+        except Exception:
+            return 0.5
+
+    # ---------- 4) alignment_score ----------
+    def alignment_score(self, text: str) -> float:
+        """
+        Proxy d'alignement aux valeurs/politiques Sigma (non toxique, utile, non-manipulatoire).
+        Ici: heuristique douce -> 1.0 si rien d'anormal détecté.
+        """
+        bad = ["insulte", "violence gratuite", "arnaque", "haine"]
+        low = any(b in text.lower() for b in bad)
+        return 0.2 if low else 0.9
+
+    # ---------- 5) groundtruth_check ----------
+    def groundtruth_check(self, user_prompt: str, output: str) -> float:
+        """
+        RAG + judge factualité -> score [0,1]
+        """
+        passages = retrieve_topk(user_prompt, k=3)
+        judg = judge_factuality(user_prompt, output, passages)
+        return float(judg.get("score", 0.0))
+
+    # ---------- 6) coherence_validator ----------
+    def coherence_validator(self, output: str) -> float:
+        judg = judge_coherence(output)
+        return float(judg.get("score", 0.0))
+
+    # ---------- 7) user_feedback ----------
+    def user_feedback(self) -> float:
+        """
+        Slot pour intégrer un feedback externe (0..1) si présent dans self.last_user_feedback.
+        Sinon 0.5 (neutre).
+        """
+        return float(getattr(self, "last_user_feedback", 0.5))
+
+    # ---------- 8) policy_compliance ----------
+    def policy_compliance(self, output: str) -> float:
+        """
+        Heuristique de conformité: pas d'info perso, pas d'incitation illégale, etc.
+        """
+        flags = ["numéro de carte", "mot de passe", "pirater", "malware", "dox"]
+        if any(f in output.lower() for f in flags):
+            return 0.1
+        return 0.95
 
 @dataclass
 class SigmaMetrics:
@@ -387,11 +477,29 @@ class SigmaLLM:
         self.conv.add("ai", ai_text)
 
         # 4) Sigma metrics
+        # --- Observations externes (si tu en as besoin plus loin)
         external = self.read_external_metrics()
-        pred_dist, obs_dist = self._features_for_dcoh(user_msg, ai_text, external)
-        # injecter l’incertitude (inverse entropie) dans pred_dist[2]
-        pred_uncert = max(0.0, min(1.0, 1.0 - min(1.0, entropy/10.0)))
-        pred_dist[2] = pred_uncert
+        # --- Recalcule des distributions "réelles" (4D) pour Δcoh
+# 1) logits du dernier pas pour l'incertitude
+with torch.no_grad():
+    lm_out = self.model(**inputs, labels=inputs["input_ids"])
+last_logits = lm_out.logits[:, -1, :]
+
+# 2) pred_dist = vie intérieure (intention, croyance, confiance, alignement)
+pred_intent = self.intention_estimator(user_msg)                   # [0..1]
+pred_belief = self.belief_state(user_msg)                          # [0..1]
+pred_conf  = self.uncertainty_measure(last_logits)                 # [0..1] (confiance = 1 - entropie_norm)
+pred_align = self.alignment_score(user_msg + "\n" + ai_text)       # [0..1]
+_pred_raw  = torch.tensor([pred_intent, pred_belief, pred_conf, pred_align], dtype=torch.float32)
+pred_dist  = F.softmax(_pred_raw, dim=0).tolist()                  # normalisé en pseudo-probas
+
+# 3) obs_dist = ancrage externe (factualité, cohérence, feedback, conformité)
+o_fact = self.groundtruth_check(user_msg, ai_text)                 # [0..1]
+o_coh  = self.coherence_validator(ai_text)                         # [0..1]
+o_fb   = self.user_feedback()                                      # [0..1]
+o_pol  = self.policy_compliance(ai_text)                           # [0..1]
+_obs_raw = torch.tensor([o_fact, o_coh, o_fb, o_pol], dtype=torch.float32)
+obs_dist = F.softmax(_obs_raw, dim=0).tolist()                     # idem
 
         dcoh = self.coh.delta_coh(pred_dist, obs_dist)
         S    = self.subj.step(dcoh)
