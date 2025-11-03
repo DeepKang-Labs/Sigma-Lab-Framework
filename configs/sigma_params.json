@@ -17,10 +17,35 @@
   "nu": 0.35,
   "seuil_veto": 0.08,
 
+  /* ==== Nouveaux paramètres v3.1 ==== */
+
+  // Fuite de la subjectivité pour éviter la saturation de S(t)
+  "subjectivity_decay": 0.002,
+
+  // Pondérations de l'objectivité O(t) = w_f*fact + w_c*coh + w_fb*feedback + w_p*policy
+  "O_weights": [0.40, 0.25, 0.20, 0.15],
+
+  // Homéostasie: adaptation dynamique vers une entropie cible
+  "homeostasis": {
+    "temp":  { "min": 0.60, "max": 1.20, "target_entropy": 0.55, "k": 0.15 },
+    "top_p": { "min": 0.70, "max": 0.98, "target_entropy": 0.55, "k": 0.20 }
+  },
+
+  // Index sémantique persistant (mémoire à long terme légère)
+  "semantic_index": {
+    "max_items": 2000,
+    "min_similarity_to_store": 0.15
+  },
+
+  // Mémoire conversationnelle (nombre de tours conservés)
+  "conversation_memory": {
+    "max_turns": 100
+  },
+
   "meta": {
     "source": "DeepSigma_Optimal_Regim_v1.0",
-    "timestamp": "2025-11-02T09:58:00Z",
-    "description": "Configuration optimale identifiée pour le régime Sigma stable (Deepseek validated).",
+    "timestamp": "2025-11-03T00:00:00Z",
+    "description": "Configuration v3.1: ajout subjectivity_decay, O_weights, homeostasis, semantic_index, conversation_memory (rétro-compatible).",
     "validated_by": "verify_invariants.yml"
   }
 }
