@@ -59,28 +59,44 @@ def safe_dump_json(path: str, data: Any):
     os.replace(tmp, path)
 
 # ---------------------- Paramètres par défaut (synchro avec sigma_params.json)-
+
+# ---------------------- Paramètres Sigma par défaut ---------------------------
 DEFAULT_SIGMA_PARAMS: Dict[str, Any] = {
-    "alpha": 0.315, "beta": 0.0, "gamma": 0.006, "lambda": 0.195, "mu": 0.205,
+    "alpha": 0.315,
+    "beta": 0.0,
+    "gamma": 0.006,
+    "lambda": 0.195,
+    "mu": 0.205,
+
     "theta": [0.52, 0.47, 0.41, 0.50],
-    "W": [[1.0,0.42,0.31,0.55],[0.42,1.0,0.48,0.63],[0.31,0.48,1.0,0.58],[0.55,0.63,0.58,1.0]],
-    "nu": 0.35, "seuil_veto": 0.08,
-    "subjectivity_decay": 0.002,
-    "O_weights": [0.40, 0.25, 0.20, 0.15],
+    "W": [
+        [1.00, 0.42, 0.31, 0.55],
+        [0.42, 1.00, 0.48, 0.63],
+        [0.31, 0.48, 1.00, 0.58],
+        [0.55, 0.63, 0.58, 1.00]
+    ],
+
+    "nu": 0.35,
+    "seuil_veto": 0.08,
+
+    # v3.1 – nouveaux paramètres (Python comments only)
+    "subjectivity_decay": 0.002,                 # évite la saturation de S(t)
+    "O_weights": [0.40, 0.25, 0.20, 0.15],       # fact, coh, feedback, policy
+
     "homeostasis": {
-        "temp":  { "min": 0.60, "max": 1.20, "target_entropy": 0.55, "k": 0.15 },
-        "top_p": { "min": 0.70, " "max": 0.98, "target_entropy": 0.55, "k": 0.20 }
+        "temp":  {"min": 0.60, "max": 1.20, "target_entropy": 0.55, "k": 0.15},
+        "top_p": {"min": 0.70, "max": 0.98, "target_entropy": 0.55, "k": 0.20}
     },
-    "semantic_index": { "max_items": 2000, "min_similarity_to_store": 0.15 },
-    "conversation_memory": { "max_turns": 100 }
+
+    "semantic_index": {
+        "max_items": 2000,
+        "min_similarity_to_store": 0.15
+    },
+
+    "conversation_memory": {
+        "max_turns": 100
+    },
 }
-
-def load_sigma_params() -> Dict[str, Any]:
-    p = safe_load_json(PARAMS_FILE, DEFAULT_SIGMA_PARAMS)
-    W = p.get("W", [])
-    if not (isinstance(W, list) and len(W)==4 and all(isinstance(r,list) and len(r)==4 for r in W)):
-        raise ValueError("Invariant failed: W must be 4x4")
-    return p
-
 # ---------------------- Coeurs Sigma ------------------------------------------
 class CoherenceEngine:
     @staticmethod
