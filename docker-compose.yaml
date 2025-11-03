@@ -1,6 +1,13 @@
 version: "3.9"
 
+networks:
+  sigma_net: {}
+
+volumes:
+  grafana-storage: {}
+
 services:
+  # ==== 1) Stack Sigma Mesh (inchangée) ======================================
   sigma-node:
     image: ghcr.io/deepkang-labs/sigma:latest
     container_name: sigma-node
@@ -13,6 +20,7 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    networks: [sigma_net]
 
   mesh-federate:
     image: ghcr.io/deepkang-labs/sigma:latest
@@ -25,6 +33,7 @@ services:
     volumes:
       - ./artifacts:/data/artifacts
     restart: unless-stopped
+    networks: [sigma_net]
 
   mesh-apply:
     image: ghcr.io/deepkang-labs/sigma:latest
@@ -37,3 +46,63 @@ services:
     volumes:
       - ./artifacts:/data/artifacts
     restart: unless-stopped
+    networks: [sigma_net]
+
+  # ==== 2) (Optionnel) Service Sigma-LLM avec exporter Prometheus ============
+  # Monte le code/config locales et expose /metrics sur 9108.
+  sigma-llm:
+    image: ghcr.io/deepkang-labs/sigma:latest
+    container_name: sigma-llm
+    environment:
+      MODE: llm
+      SIGMA_LLM_MODEL: "${SIGMA_LLM_MODEL:-sshleifer/tiny-gpt2}"  # remplace par ton modèle
+      SIGMA_PROM_PORT: "9108"
+    volumes:
+      - ./:/workspace:ro
+      - ./configs:/workspace/configs
+      - ./state:/workspace/state
+      - ./reports:/workspace/reports
+      - ./outputs:/workspace/outputs
+    working_dir: /workspace
+    command: >
+      bash -lc "
+        python -u sigma_llm_complete.py --prompt 'boot' || true;
+        # garde le conteneur vivant pour exposer /metrics si l’exporter tourne en thread
+        tail -f /dev/null
+      "
+    ports:
+      - "9108:9108"
+    depends_on:
+      - sigma-node
+    restart: unless-stopped
+    networks: [sigma_net]
+
+  # ==== 3) Observabilité ======================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sigma-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - sigma-llm
+    restart: unless-stopped
+    networks: [sigma_net]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sigma-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning:ro
+      - grafana-storage:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks: [sigma_net]
