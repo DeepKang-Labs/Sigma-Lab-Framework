@@ -1,0 +1,40 @@
+{
+  "annotations": {"list":[{"builtIn":1,"type":"dashboard","name":"Annotations & Alerts"}]},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "panels": [
+    {
+      "type": "gauge",
+      "title": "Δcoh",
+      "targets": [{"expr": "sigma_delta_coh"}],
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "type": "gauge",
+      "title": "S(t)",
+      "targets": [{"expr": "sigma_S"}],
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+    },
+    {
+      "type": "gauge",
+      "title": "O(t)",
+      "targets": [{"expr": "sigma_O"}],
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+    },
+    {
+      "type": "gauge",
+      "title": "Entropy",
+      "targets": [{"expr": "sigma_entropy"}],
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 8}
+    },
+    {
+      "type": "gauge",
+      "title": "temp / top_p",
+      "targets": [{"expr": "sigma_temp"}],
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 8}
+    }
+  ],
+  "schemaVersion": 37,
+  "title": "Sigma-LLM",
+  "version": 1
+}
