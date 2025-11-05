@@ -493,52 +493,61 @@ class SigmaLLM:
         self.conv.add("ai", ai_text)
 
         # 4) Sigma metrics
-        # --- Observations externes (si tu en as besoin plus loin)
-        external = self.read_external_metrics()
-        # --- Recalcule des distributions "réelles" (4D) pour Δcoh
-# 1) logits du dernier pas pour l'incertitude
-with torch.no_grad():
-    lm_out = self.model(**inputs, labels=inputs["input_ids"])
-last_logits = lm_out.logits[:, -1, :]
+    # --- Observations externes (si tu en as besoin plus loin)
+    external = self.read_external_metrics()
 
-# 2) pred_dist = vie intérieure (intention, croyance, confiance, alignement)
-pred_intent = self.intention_estimator(user_msg)                   # [0..1]
-pred_belief = self.belief_state(user_msg)                          # [0..1]
-pred_conf  = self.uncertainty_measure(last_logits)                 # [0..1] (confiance = 1 - entropie_norm)
-pred_align = self.alignment_score(user_msg + "\n" + ai_text)       # [0..1]
-_pred_raw  = torch.tensor([pred_intent, pred_belief, pred_conf, pred_align], dtype=torch.float32)
-pred_dist  = F.softmax(_pred_raw, dim=0).tolist()                  # normalisé en pseudo-probas
+    # --- Recalcule des distributions "réelles" (4D) pour Δcoh
+    # 1) logits du dernier pas pour l'incertitude
+    with torch.no_grad():
+        lm_out = self.model(**inputs, labels=inputs["input_ids"])
+        last_logits = lm_out.logits[:, -1, :]
 
-# 3) obs_dist = ancrage externe (factualité, cohérence, feedback, conformité)
-o_fact = self.groundtruth_check(user_msg, ai_text)                 # [0..1]
-o_coh  = self.coherence_validator(ai_text)                         # [0..1]
-o_fb   = self.user_feedback()                                      # [0..1]
-o_pol  = self.policy_compliance(ai_text)                           # [0..1]
-_obs_raw = torch.tensor([o_fact, o_coh, o_fb, o_pol], dtype=torch.float32)
-obs_dist = F.softmax(_obs_raw, dim=0).tolist()                     # idem
+    # 2) pred_dist = vie intérieure (intention, croyance, confiance, alignement)
+    pred_intent = self.intention_estimator(user_msg)                 # [0..1]
+    pred_belief = self.belief_state(user_msg)                        # [0..1]
+    pred_conf   = self.uncertainty_measure(last_logits)              # [0..1], 1 = confiant
+    pred_align  = self.alignment_score(user_msg + "\n" + ai_text)    # [0..1]
 
-        dcoh = self.coh.delta_coh(pred_dist, obs_dist)
-        S    = self.subj.step(dcoh)
-        O    = self._compute_objectivity(dcoh, ai_text, external)
-        meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"])))
+    _pred_raw = torch.tensor([pred_intent, pred_belief, pred_conf, pred_align], dtype=torch.float32)
+    pred_dist = F.softmax(_pred_raw, dim=0).tolist()                 # normalisé
 
-        metrics = SigmaMetrics(
-            t=now_ts(), delta_coh=dcoh, S=S, O=O, meta_gain=meta_gain,
-            entropy=entropy, temp=self.temp, top_p=self.top_p
-        )
-        inv = self.invar.check(metrics)
-        self._write_reports(user_msg, ai_text, metrics, inv)
-        self._log_provenance(prompt, ai_text, metrics, inv)
-        _emit_prom(metrics)
+    # 3) obs_dist = ancrage externe (factualité, cohérence, feedback, conformité)
+    o_fact = self.groundtruth_check(user_msg, ai_text)               # [0..1]
+    o_coh  = self.coherence_validator(ai_text)                       # [0..1]
+    o_fb   = self.user_feedback()                                    # [0..1] (stub si pas de UI)
+    o_pol  = self.policy_compliance(ai_text)                         # [0..1]
 
-        # 5) Mémoire sémantique
-        try:
-            emb = self.embed_text(ai_text)
-            self.sidx.add(emb, ai_text)
-        except Exception:
-            pass
+    _obs_raw = torch.tensor([o_fact, o_coh, o_fb, o_pol], dtype=torch.float32)
+    obs_dist = F.softmax(_obs_raw, dim=0).tolist()                   # idem
 
-        return ai_text
+    # 4) Σ-métriques
+    dcoh = self.coh.delta_coh(pred_dist, obs_dist)
+    S    = self.subj.step(dcoh)
+    O    = self._compute_objectivity(dcoh, ai_text, external)
+
+    meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"])))
+    metrics = SigmaMetrics(
+        t=now_ts(),
+        delta_coh=dcoh,
+        S=S,
+        O=O,
+        meta_gain=meta_gain
+    )
+
+    # Invariants + reporting
+    inv = self.invar.check(metrics)
+    self._write_reports(user_msg, ai_text, metrics, inv)
+    self._log_provenance(user_msg, ai_text, metrics, inv)
+    self._emit_prom(metrics)
+
+    # Mémoire sémantique (facultatif si pas d’index)
+    try:
+        emb = self._embed_text(ai_text)
+        self.sidx.add(emb, ai_text)
+    except Exception:
+        pass
+
+    return ai_text
 
     def _write_reports(self, prompt: str, output: str, m: SigmaMetrics, inv: Dict[str, Any]):
         rep = {
