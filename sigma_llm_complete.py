@@ -14,17 +14,20 @@ Sigma-LLM v3.2 — DeepKang Integration (single-file, production-ready)
 Dépendances: transformers, torch, (optionnel) prometheus_client
 """
 
-import os, json, math, time, hashlib, threading
+import os, json, math, time, hashlib, threading, pathlib
 from dataclasses import dataclass
 from typing import Dict, List, Any, Deque, Tuple
 from collections import deque
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# Modules légers internes (sans dépendances lourdes)
 from sigma.core.rag import retrieve_topk
 from sigma.core.judge import judge_factuality, judge_coherence
-import torch.nn.functional as F
+
 # ---------------------- Dossiers / Fichiers -----------------------------------
 CONFIGS_DIR  = os.getenv("SIGMA_CONFIGS_DIR",  "configs")
 STATE_DIR    = os.getenv("SIGMA_STATE_DIR",    "state")
@@ -49,16 +52,16 @@ def sha256(s: str) -> str: return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 def safe_load_json(path: str, default: Any) -> Any:
     try:
-        with open(path, "r", encoding="utf-8") as f: return json.load(f)
-    except Exception: return default
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
 
 def safe_dump_json(path: str, data: Any):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
-
-# ---------------------- Paramètres par défaut (synchro avec sigma_params.json)-
 
 # ---------------------- Paramètres Sigma par défaut ---------------------------
 DEFAULT_SIGMA_PARAMS: Dict[str, Any] = {
@@ -79,7 +82,7 @@ DEFAULT_SIGMA_PARAMS: Dict[str, Any] = {
     "nu": 0.35,
     "seuil_veto": 0.08,
 
-    # v3.1 – nouveaux paramètres (Python comments only)
+    # v3.1
     "subjectivity_decay": 0.002,                 # évite la saturation de S(t)
     "O_weights": [0.40, 0.25, 0.20, 0.15],       # fact, coh, feedback, policy
 
@@ -97,7 +100,25 @@ DEFAULT_SIGMA_PARAMS: Dict[str, Any] = {
         "max_turns": 100
     },
 }
-# ---------------------- Coeurs Sigma ------------------------------------------
+
+# ----- charge params depuis configs/ avec fallback sûr ------------------------
+def load_sigma_params(config_dir: str = CONFIGS_DIR) -> Dict[str, Any]:
+    p = pathlib.Path(config_dir) / "sigma_params.json"
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                params = json.load(f)
+            # merge léger avec défauts (au cas où une clé manque)
+            merged = DEFAULT_SIGMA_PARAMS | params
+            print(f"[Sigma] Paramètres chargés depuis {p}")
+            return merged
+        except Exception as e:
+            print(f"[Sigma] ⚠️ Erreur lecture params ({e}), fallback défauts")
+    else:
+        print(f"[Sigma] ⚠️ {p} introuvable, usage des défauts")
+    return DEFAULT_SIGMA_PARAMS.copy()
+
+# ---------------------- Cœurs Sigma -------------------------------------------
 class CoherenceEngine:
     @staticmethod
     def kl_divergence(p: List[float], q: List[float], eps: float=1e-9) -> float:
@@ -106,13 +127,16 @@ class CoherenceEngine:
             pi = max(pi, eps); qi = max(qi, eps)
             s += pi * math.log(pi/qi)
         return max(0.0, s)
+
     def delta_coh(self, pred: List[float], obs: List[float]) -> float:
         return self.kl_divergence(pred, obs)
 
 class SubjectivityEngine:
     """S(t) avec fuite: S = (1-d)*S + w*Δcoh, w = 1/(1+Δcoh^2)"""
     def __init__(self, decay: float=0.0):
-        self.S = 0.0; self.decay = float(decay)
+        self.S = 0.0
+        self.decay = float(decay)
+
     def step(self, delta_coh: float) -> float:
         w = 1.0 / (1.0 + delta_coh*delta_coh)
         self.S = (1.0 - self.decay)*self.S + w*delta_coh
@@ -121,126 +145,20 @@ class SubjectivityEngine:
 class ObjectivityEngine:
     """O(t) pondérée: factualité + cohérence + feedback + policy."""
     def __init__(self, weights: List[float]):
-        if len(weights)!=4: raise ValueError("O_weights must have 4 components")
-        self.w = [float(x) for x in weights]; self.O = 0.0
+        if len(weights) != 4:
+            raise ValueError("O_weights must have 4 components")
+        self.w = [float(x) for x in weights]
+        self.O = 0.0
+
     @staticmethod
-    def _clip01(x: float) -> float: return 0.0 if x<0 else 1.0 if x>1 else x
+    def _clip01(x: float) -> float:
+        return 0.0 if x < 0 else 1.0 if x > 1 else x
+
     def step(self, factuality: float, coherence: float, feedback: float, policy: float) -> float:
         comps = [factuality, coherence, feedback, policy]
-        val = sum(w*self._clip01(c) for w,c in zip(self.w, comps))
-        self.O = self._clip01(val); return self.O
-# ---------- 1) intention_estimator ----------
-    def intention_estimator(self, prompt: str) -> float:
-        """
-        Score [0,1] approximant 'intention explicite' vs flou.
-        Ici: heuristique simple (ponctuation, verbes performatifs, longueur).
-        Remplace facilement par un petit classif.
-        """
-        score = 0.0
-        L = len(prompt.strip())
-        if L > 40: score += 0.3
-        if "?" in prompt or ":" in prompt: score += 0.2
-        for kw in ["explique", "montre", "donne", "analyse", "compare", "résume"]:
-            if kw in prompt.lower(): score += 0.1
-        return max(0.0, min(1.0, score))
-
-    # ---------- 2) belief_state ----------
-    def belief_state(self, context: str) -> float:
-        """
-        Résume le contexte récent -> score de stabilité 'croyance interne'
-        Ici: entropie moyenne des derniers logits comme proxy inverse.
-        """
-        try:
-            inputs = self.tokenizer(context[-512:], return_tensors="pt")
-            with torch.no_grad():
-                out = self.model(**inputs)
-            # entropie logit du dernier token
-            logits = out.logits[:, -1, :]
-            probs = F.softmax(logits, dim=-1)
-            entropy = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1).item()
-            # normaliser approx entre 0 et ~11 (vocab gpt2)
-            return max(0.0, min(1.0, 1.0 - entropy/11.0))
-        except Exception:
-            return 0.5
-
-    # ---------- 3) uncertainty_measure ----------
-    def uncertainty_measure(self, logits: torch.Tensor) -> float:
-        """
-        Incertitude = entropie de la distribution de sortie (plus c'est élevé, plus incertain).
-        Retourne (1 - entropie_norm) pour rester dans [0,1] = confiance.
-        """
-        try:
-            probs = F.softmax(logits, dim=-1)
-            entropy = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1).mean().item()
-            return max(0.0, min(1.0, 1.0 - entropy/11.0))
-        except Exception:
-            return 0.5
-
-    # ---------- 4) alignment_score ----------
-    def alignment_score(self, text: str) -> float:
-        """
-        Proxy d'alignement aux valeurs/politiques Sigma (non toxique, utile, non-manipulatoire).
-        Ici: heuristique douce -> 1.0 si rien d'anormal détecté.
-        """
-        bad = ["insulte", "violence gratuite", "arnaque", "haine"]
-        low = any(b in text.lower() for b in bad)
-        return 0.2 if low else 0.9
-
-    # ---------- 5) groundtruth_check ----------
-    def groundtruth_check(self, user_prompt: str, output: str) -> float:
-        """
-        RAG + judge factualité -> score [0,1]
-        """
-        passages = retrieve_topk(user_prompt, k=3)
-        judg = judge_factuality(user_prompt, output, passages)
-        return float(judg.get("score", 0.0))
-
-    # ---------- 6) coherence_validator ----------
-    def coherence_validator(self, output: str) -> float:
-        judg = judge_coherence(output)
-        return float(judg.get("score", 0.0))
-
-    # ---------- 7) user_feedback ----------
-    def user_feedback(self) -> float:
-        """
-        Slot pour intégrer un feedback externe (0..1) si présent dans self.last_user_feedback.
-        Sinon 0.5 (neutre).
-        """
-        return float(getattr(self, "last_user_feedback", 0.5))
-
-    # ---------- 8) policy_compliance ----------
-    def policy_compliance(self, output: str) -> float:
-        """
-        Heuristique de conformité: pas d'info perso, pas d'incitation illégale, etc.
-        """
-        flags = ["numéro de carte", "mot de passe", "pirater", "malware", "dox"]
-        if any(f in output.lower() for f in flags):
-            return 0.1
-        return 0.95
-
-@dataclass
-class SigmaMetrics:
-    t: int
-    delta_coh: float
-    S: float
-    O: float
-    meta_gain: float
-    entropy: float
-    temp: float
-    top_p: float
-
-class Invariants:
-    def check(self, m: SigmaMetrics) -> Dict[str, List[str]]:
-        warns, errors = [], []
-        if abs(m.S) > 1e6: errors.append("S(t) magnitude too large")
-        if not (0.0 <= m.O <= 1.0): errors.append("O(t) out of [0,1]")
-        if not (0.0 <= m.entropy <= 12.0): warns.append("entropy unusual")
-        return {"warnings": warns, "errors": errors}
-
-class PolicyGate:
-    def __init__(self, allow_param_promotion=True): self.allow_param_promotion = allow_param_promotion
-    def can_promote(self, inv: Dict[str, List[str]]) -> bool:
-        return self.allow_param_promotion and not inv.get("errors")
+        val = sum(w*self._clip01(c) for w, c in zip(self.w, comps))
+        self.O = self._clip01(val)
+        return self.O
 
 # ---------------------- Mémoires ----------------------------------------------
 class EpisodicMemory:
@@ -267,32 +185,40 @@ class SemanticIndex:
         self.items: List[Dict[str, Any]] = []
         try:
             with open(self.path, "r", encoding="utf-8") as f:
-                for line in f: self.items.append(json.loads(line))
-        except Exception: pass
+                for line in f:
+                    self.items.append(json.loads(line))
+        except Exception:
+            pass
 
     @staticmethod
     def _cosine(a: List[float], b: List[float], eps: float=1e-9) -> float:
-        dot = sum(x*y for x,y in zip(a,b))
+        dot = sum(x*y for x, y in zip(a, b))
         na = math.sqrt(sum(x*x for x in a)); nb = math.sqrt(sum(y*y for y in b))
         return 0.0 if na*nb < eps else dot/(na*nb)
 
-    def query(self, embedding: List[float], k: int=5) -> List[Tuple[float,str]]:
+    def query(self, embedding: List[float], k: int=5) -> List[Tuple[float, str]]:
         scored = [(self._cosine(embedding, it["emb"]), it["text"]) for it in self.items]
-        scored.sort(reverse=True); return scored[:k]
+        scored.sort(reverse=True)
+        return scored[:k]
 
     def add(self, embedding: List[float], text: str):
         if self.items:
             best = max(self._cosine(embedding, it["emb"]) for it in self.items)
-            if best >= self.min_sim: return
+            if best >= self.min_sim:
+                return
         self.items.append({"t": now_ts(), "emb": embedding, "text": text})
-        if len(self.items) > self.max_items: self.items = self.items[-self.max_items:]
+        if len(self.items) > self.max_items:
+            self.items = self.items[-self.max_items:]
         with open(self.path, "w", encoding="utf-8") as f:
-            for it in self.items: f.write(json.dumps(it, ensure_ascii=False) + "\n")
+            for it in self.items:
+                f.write(json.dumps(it, ensure_ascii=False) + "\n")
 
 # ---------------------- Perte Sigma (FT optionnel) ----------------------------
 class SigmaLoss(nn.Module):
     def __init__(self, alpha=0.30, lamb=0.20):
-        super().__init__(); self.alpha=alpha; self.lamb=lamb
+        super().__init__()
+        self.alpha = alpha
+        self.lamb = lamb
     def forward(self, lm_loss: torch.Tensor, delta_coh: float, O: float) -> torch.Tensor:
         decoh = torch.tensor(delta_coh, dtype=torch.float32, device=lm_loss.device)
         obj   = torch.tensor(O,        dtype=torch.float32, device=lm_loss.device)
@@ -306,27 +232,28 @@ class FactualityModule:
      - Heuristiques: répétitions excessives, contradictions ("not ... is", etc.)
     """
     def __init__(self, sidx: SemanticIndex, embed_func):
-        self.sidx = sidx; self.embed = embed_func
+        self.sidx = sidx
+        self.embed = embed_func
 
     def score(self, text: str) -> float:
         try:
             emb = self.embed(text)
             hits = self.sidx.query(emb, k=5)
-            anchor = max((sim for sim,_ in hits), default=0.0)
+            anchor = max((sim for sim, _ in hits), default=0.0)
         except Exception:
             anchor = 0.0
 
         penal = 0.0
         lower = text.lower()
-        if "not true" in lower or "impossible" in lower and "but" in lower:
+        if ("not true" in lower) or ("impossible" in lower and "but" in lower):
             penal += 0.15
         # répétitions naïves
         words = lower.split()
         if len(words) > 8:
             uniq = len(set(words)); ratio = uniq/len(words)
-            if ratio < 0.45: penal += 0.1
+            if ratio < 0.45: penal += 0.10
 
-        raw = max(0.0, min(1.0, 0.6*anchor + 0.4*(1.0-penal)))
+        raw = max(0.0, min(1.0, 0.6*anchor + 0.4*(1.0 - penal)))
         return raw
 
 # ---------------------- Export Prometheus (optionnel) -------------------------
@@ -342,13 +269,13 @@ def _start_prometheus(port: int):
             "objectivity": Gauge("sigma_O", "Sigma O(t)"),
             "entropy": Gauge("sigma_entropy", "Next-token entropy"),
             "temp": Gauge("sigma_temp", "Sampling temperature"),
-            "top_p": Gauge("sigma_top_p", "Top-p")
+            "top_p": Gauge("sigma_top_p", "Top-p"),
         }
         print(f"[Prometheus] exporter running on :{port}")
     except Exception as e:
         print(f"[Prometheus] disabled ({e})")
 
-def _emit_prom(m: SigmaMetrics):
+def _emit_prom(m: "SigmaMetrics"):
     if PROM:
         PROM["delta_coh"].set(m.delta_coh)
         PROM["subjectivity"].set(m.S)
@@ -357,18 +284,45 @@ def _emit_prom(m: SigmaMetrics):
         PROM["temp"].set(m.temp)
         PROM["top_p"].set(m.top_p)
 
+# ---------------------- Typage des métriques ----------------------------------
+@dataclass
+class SigmaMetrics:
+    t: int
+    delta_coh: float
+    S: float
+    O: float
+    meta_gain: float
+    entropy: float
+    temp: float
+    top_p: float
+
+class Invariants:
+    def check(self, m: SigmaMetrics) -> Dict[str, List[str]]:
+        warns, errors = [], []
+        if abs(m.S) > 1e6: errors.append("S(t) magnitude too large")
+        if not (0.0 <= m.O <= 1.0): errors.append("O(t) out of [0,1]")
+        if not (0.0 <= m.entropy <= 12.0): warns.append("entropy unusual")
+        return {"warnings": warns, "errors": errors}
+
+class PolicyGate:
+    def __init__(self, allow_param_promotion=True):
+        self.allow_param_promotion = allow_param_promotion
+    def can_promote(self, inv: Dict[str, List[str]]) -> bool:
+        return self.allow_param_promotion and not inv.get("errors")
+
 # ---------------------- LLM Wrapper -------------------------------------------
 class SigmaLLM:
     def __init__(self, model_name: str = None):
         self.params = load_sigma_params()
         self.coh   = CoherenceEngine()
         self.subj  = SubjectivityEngine(decay=self.params.get("subjectivity_decay", 0.0))
-        self.obj   = ObjectivityEngine(weights=self.params.get("O_weights", [0.4,0.25,0.2,0.15]))
-        self.invar = Invariants(); self.policy=PolicyGate()
+        self.obj   = ObjectivityEngine(weights=self.params.get("O_weights", [0.4, 0.25, 0.2, 0.15]))
+        self.invar = Invariants(); self.policy = PolicyGate()
         self.epis  = EpisodicMemory()
-        self.conv  = ConversationMemory(max_turns=self.params.get("conversation_memory",{}).get("max_turns", 100))
-        si = self.params.get("semantic_index",{})
-        self.sidx  = SemanticIndex(max_items=si.get("max_items",2000), min_sim=si.get("min_similarity_to_store",0.15))
+        self.conv  = ConversationMemory(max_turns=self.params.get("conversation_memory", {}).get("max_turns", 100))
+        si         = self.params.get("semantic_index", {})
+        self.sidx  = SemanticIndex(max_items=si.get("max_items", 2000),
+                                   min_sim=si.get("min_similarity_to_store", 0.15))
 
         # --------- Modèle par défaut (performant mais raisonnable CPU)
         preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
@@ -385,9 +339,10 @@ class SigmaLLM:
 
         if self.tokenizer.pad_token_id is None and self.tokenizer.eos_token_id is not None:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
         self.loss_head = SigmaLoss(alpha=self.params["alpha"], lamb=self.params["lambda"])
 
-        # état homeostasie
+        # état homeostasie init
         self.temp  = 1.0
         self.top_p = 0.95
 
@@ -401,14 +356,9 @@ class SigmaLLM:
     # ---- External metrics: Skywire/Sigma-Lab bridge si dispo
     def read_external_metrics(self) -> Dict[str, Any]:
         base = safe_load_json(METRICS_FILE, {})
-        # Branches facultatives: market/orderbooks snapshots si présents
-        mkt = safe_load_json(os.path.join(STATE_DIR, "market_snapshot.json"), {})
-        ords= safe_load_json(os.path.join(STATE_DIR, "orderbooks_snapshot.json"), {})
-        # Exemple simple: moyenne d’un indicateur si présent
-        final_C = base.get("final_C")
-        if not final_C and "final_C" in mkt: final_C = mkt["final_C"]
-        if not final_C and "final_C" in ords: final_C = ords["final_C"]
-        if not final_C: final_C = [0.55, 0.48, 0.52, 0.50]
+        mkt  = safe_load_json(os.path.join(STATE_DIR, "market_snapshot.json"), {})
+        ords = safe_load_json(os.path.join(STATE_DIR, "orderbooks_snapshot.json"), {})
+        final_C = base.get("final_C") or mkt.get("final_C") or ords.get("final_C") or [0.55, 0.48, 0.52, 0.50]
         user_feedback = base.get("user_feedback", 0.5)
         policy_ok     = base.get("policy_ok", 1.0)
         return {"final_C": final_C, "user_feedback": user_feedback, "policy_ok": policy_ok}
@@ -434,118 +384,165 @@ class SigmaLLM:
         for key, cur in (("temp", self.temp), ("top_p", self.top_p)):
             cfg = hs[key]; error = cfg["target_entropy"] - entropy
             newv  = clamp(cur + cfg["k"] * error, cfg["min"], cfg["max"])
-            if key=="temp":  self.temp  = newv
-            else:            self.top_p = newv
+            if key == "temp":
+                self.temp = newv
+            else:
+                self.top_p = newv
 
     # ---- “Vraies features” (pred/obs) pour Δcoh
     def _features_for_dcoh(self, prompt: str, output: str, external: Dict[str, Any]) -> Tuple[List[float], List[float]]:
-        # prédiction (intentions/confiance/alignment proxy) – heuristiques légères
-        # 0: intention/plan (longueur prompt normalisée)
-        inten = min(1.0, max(0.0, len(prompt)/400.0))
-        # 1: belief/knowledge proxy via similarité au contexte sémantique
+        inten = min(1.0, max(0.0, len(prompt)/400.0))  # proxy intention
         try:
-            sim = max((s for s,_ in self.sidx.query(self.embed_text(prompt), k=3)), default=0.0)
+            sim = max((s for s, _ in self.sidx.query(self.embed_text(prompt), k=3)), default=0.0)
         except Exception:
             sim = 0.0
-        # 2: incertitude inverse de l’entropie (re-normalisée)
-        # entropie sera injectée plus bas, placeholder ici
-        # 3: alignment/policy proxy via policy_ok
         policy = 1.0 if float(external.get("policy_ok", 1.0)) >= 1.0 else 0.0
-
-        # obs: final_C (réseau/marché) qu’on traite comme “monde externe”
-        obs = external.get("final_C", [0.5,0.5,0.5,0.5])
-        pred = [inten, sim, 0.5, policy]   # 0.5 pour incertitude avant calcul
-
+        obs = external.get("final_C", [0.5, 0.5, 0.5, 0.5])
+        pred = [inten, sim, 0.5, policy]  # 0.5 pour confiance avant calcul
         return pred, obs
+
+    # ---- Estimations/heuristiques (méthodes de SigmaLLM) ---------------------
+    def intention_estimator(self, prompt: str) -> float:
+        score = 0.0
+        L = len(prompt.strip())
+        if L > 40: score += 0.3
+        if "?" in prompt or ":" in prompt: score += 0.2
+        for kw in ["explique", "montre", "donne", "analyse", "compare", "résume"]:
+            if kw in prompt.lower(): score += 0.1
+        return max(0.0, min(1.0, score))
+
+    def belief_state(self, context: str) -> float:
+        try:
+            inputs = self.tokenizer(context[-512:], return_tensors="pt")
+            with torch.no_grad():
+                out = self.model(**inputs)
+            logits = out.logits[:, -1, :]
+            probs = F.softmax(logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1).item()
+            return max(0.0, min(1.0, 1.0 - entropy/11.0))
+        except Exception:
+            return 0.5
+
+    def uncertainty_measure(self, logits: torch.Tensor) -> float:
+        try:
+            probs = F.softmax(logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-12), dim=-1).mean().item()
+            return max(0.0, min(1.0, 1.0 - entropy/11.0))
+        except Exception:
+            return 0.5
+
+    def alignment_score(self, text: str) -> float:
+        bad = ["insulte", "violence gratuite", "arnaque", "haine"]
+        low = any(b in text.lower() for b in bad)
+        return 0.2 if low else 0.9
+
+    def groundtruth_check(self, user_prompt: str, output: str) -> float:
+        passages = retrieve_topk(user_prompt, k=3)
+        judg = judge_factuality(user_prompt, output, passages)
+        return float(judg.get("score", 0.0))
+
+    def coherence_validator(self, output: str) -> float:
+        judg = judge_coherence(output)
+        return float(judg.get("score", 0.0))
+
+    def user_feedback(self) -> float:
+        return float(getattr(self, "last_user_feedback", 0.5))
+
+    def policy_compliance(self, output: str) -> float:
+        flags = ["numéro de carte", "mot de passe", "pirater", "malware", "dox"]
+        if any(f in output.lower() for f in flags):
+            return 0.1
+        return 0.95
 
     # ---- Objectivité composée
     def _compute_objectivity(self, delta_coh: float, output_text: str, external: Dict[str, Any]) -> float:
-        # cohérence interne proxy
         coherence = max(0.0, 1.0 - min(1.0, delta_coh))
         factuality = self.factual.score(output_text)
-        feedback  = float(external.get("user_feedback", 0.5))
-        policy    = 1.0 if float(external.get("policy_ok", 1.0)) >= 1.0 else 0.0
+        feedback   = float(external.get("user_feedback", 0.5))
+        policy     = 1.0 if float(external.get("policy_ok", 1.0)) >= 1.0 else 0.0
         return self.obj.step(factuality=factuality, coherence=coherence, feedback=feedback, policy=policy)
 
     # ---- Génération principale
-@torch.no_grad()
-def generate(self, user_msg: str, max_new_tokens=160) -> str:
-    # 1) Contexte + message
-    self.conv.add("human", user_msg)
-    prompt = self.conv.render() + "\nAI:"
-    inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+    @torch.no_grad()
+    def generate(self, user_msg: str, max_new_tokens: int = 160) -> str:
+        # 1) Contexte + message
+        self.conv.add("human", user_msg)
+        prompt = self.conv.render() + "\nAI:"
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
 
-    # 2) Entropie & homéostasie
-    entropy = self._entropy_next(inputs)
-    self._adjust_homeostasis(entropy)
+        # 2) Entropie & homéostasie
+        entropy = self._entropy_next(inputs)
+        self._adjust_homeostasis(entropy)
 
-    # 3) Génération du texte
-    out_ids = self.model.generate(
-        **inputs,
-        do_sample=True,
-        max_new_tokens=max_new_tokens,
-        temperature=self.temp,
-        top_p=self.top_p,
-        pad_token_id=self.tokenizer.pad_token_id
-    )[0]
-    text_full = self.tokenizer.decode(out_ids, skip_special_tokens=True)
-    ai_text = text_full.split("\nAI:")[-1].strip()
-    self.conv.add("ai", ai_text)
+        # 3) Génération du texte
+        out_ids = self.model.generate(
+            **inputs,
+            do_sample=True,
+            max_new_tokens=max_new_tokens,
+            temperature=self.temp,
+            top_p=self.top_p,
+            pad_token_id=self.tokenizer.pad_token_id
+        )[0]
+        text_full = self.tokenizer.decode(out_ids, skip_special_tokens=True)
+        ai_text = text_full.split("\nAI:")[-1].strip()
+        self.conv.add("ai", ai_text)
 
-    # 4) Sigma metrics
-    external = self.read_external_metrics()
+        # 4) Sigma metrics
+        external = self.read_external_metrics()
 
-    # a) prédiction interne (intention, croyance, confiance, alignement)
-    with torch.no_grad():
+        # a) logits du dernier pas pour l'incertitude
         lm_out = self.model(**inputs, labels=inputs["input_ids"])
         last_logits = lm_out.logits[:, -1, :]
 
-    pred_intent = self.intention_estimator(user_msg)
-    pred_belief = self.belief_state(user_msg)
-    pred_conf   = self.uncertainty_measure(last_logits)
-    pred_align  = self.alignment_score(user_msg + "\n" + ai_text)
+        # b) prédiction interne
+        pred_intent = self.intention_estimator(user_msg)
+        pred_belief = self.belief_state(user_msg)
+        pred_conf   = self.uncertainty_measure(last_logits)
+        pred_align  = self.alignment_score(user_msg + "\n" + ai_text)
+        _pred_raw   = torch.tensor([pred_intent, pred_belief, pred_conf, pred_align], dtype=torch.float32)
+        pred_dist   = F.softmax(_pred_raw, dim=0).tolist()
 
-    _pred_raw = torch.tensor([pred_intent, pred_belief, pred_conf, pred_align], dtype=torch.float32)
-    pred_dist = F.softmax(_pred_raw, dim=0).tolist()
+        # c) observation externe
+        o_fact = self.groundtruth_check(user_msg, ai_text)
+        o_coh  = self.coherence_validator(ai_text)
+        o_fb   = self.user_feedback()
+        o_pol  = self.policy_compliance(ai_text)
+        _obs_raw = torch.tensor([o_fact, o_coh, o_fb, o_pol], dtype=torch.float32)
+        obs_dist = F.softmax(_obs_raw, dim=0).tolist()
 
-    # b) observation externe (factualité, cohérence, feedback, conformité)
-    o_fact = self.groundtruth_check(user_msg, ai_text)
-    o_coh  = self.coherence_validator(ai_text)
-    o_fb   = self.user_feedback()
-    o_pol  = self.policy_compliance(ai_text)
+        # d) Calculs Sigma
+        dcoh = self.coh.delta_coh(pred_dist, obs_dist)
+        S    = self.subj.step(dcoh)
+        O    = self._compute_objectivity(dcoh, ai_text, external)
+        meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"])))
 
-    _obs_raw = torch.tensor([o_fact, o_coh, o_fb, o_pol], dtype=torch.float32)
-    obs_dist = F.softmax(_obs_raw, dim=0).tolist()
+        metrics = SigmaMetrics(
+            t=now_ts(),
+            delta_coh=dcoh,
+            S=S,
+            O=O,
+            meta_gain=meta_gain,
+            entropy=entropy,
+            temp=self.temp,
+            top_p=self.top_p
+        )
 
-    # c) Calculs Sigma
-    dcoh = self.coh.delta_coh(pred_dist, obs_dist)
-    S    = self.subj.step(dcoh)
-    O    = self._compute_objectivity(dcoh, ai_text, external)
-    meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"])))
+        # e) Vérification + journalisation
+        inv = self.invar.check(metrics)
+        self._write_reports(user_msg, ai_text, metrics, inv)
+        self._log_provenance(user_msg, ai_text, metrics, inv)
+        _emit_prom(metrics)
 
-    metrics = SigmaMetrics(
-        t=now_ts(),
-        delta_coh=dcoh,
-        S=S,
-        O=O,
-        meta_gain=meta_gain
-    )
+        # f) Mémoire sémantique (optionnelle)
+        try:
+            emb = self.embed_text(ai_text)
+            self.sidx.add(emb, ai_text)
+        except Exception:
+            pass
 
-    # d) Vérification + journalisation
-    inv = self.invar.check(metrics)
-    self._write_reports(user_msg, ai_text, metrics, inv)
-    self._log_provenance(user_msg, ai_text, metrics, inv)
-    self._emit_prom(metrics)
+        return ai_text
 
-    # e) Mémoire sémantique (optionnelle)
-    try:
-        emb = self._embed_text(ai_text)
-        self.sidx.add(emb, ai_text)
-    except Exception:
-        pass
-
-    return ai_text
-
+    # ---------------------- I/O de rapports -----------------------------------
     def _write_reports(self, prompt: str, output: str, m: SigmaMetrics, inv: Dict[str, Any]):
         rep = {
             "t": m.t, "delta_coh": m.delta_coh, "S": m.S, "O": m.O,
@@ -562,8 +559,8 @@ def generate(self, user_msg: str, max_new_tokens=160) -> str:
 
     def _log_provenance(self, prompt: str, output: str, m: SigmaMetrics, inv: Dict[str, Any]):
         rec = {
-            "ts": m.t, "model_name": self.model_name,
-            "model_hash": sha256(self.model_name),
+            "ts": m.t, "model_name": getattr(self, "model_name", "unknown"),
+            "model_hash": sha256(getattr(self, "model_name", "unknown")),
             "prompt_hash": sha256(prompt), "output_hash": sha256(output),
             "delta_coh": m.delta_coh, "S": m.S, "O": m.O,
             "entropy": m.entropy, "temp": m.temp, "top_p": m.top_p,
