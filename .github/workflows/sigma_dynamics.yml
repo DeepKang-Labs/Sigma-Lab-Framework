@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       prompt:
-        description: "Prompt one-shot pour Sigma-LLM (si régénération nécessaire)"
+        description: "Prompt one-shot pour Sigma-LLM"
         required: false
         default: "Diagnostic quotidien : état réseau & marché."
       model_name:
@@ -12,34 +12,31 @@ on:
         required: false
         default: "gpt2"
   schedule:
-    - cron: "37 4 * * *" # chaque jour à 04:37 UTC (après le job Sigma-LLM)
+    - cron: "21 4 * * *"
 
 permissions:
-  contents: write   # pour commit/push des CSV/PNG générés
-  actions: read
+  contents: write
+  pages: write
+  id-token: write
 
 concurrency:
-  group: sigma-dynamics-${{ github.ref }}
+  group: sigma-llm-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-
     env:
-      # Arborescence standard
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
       SIGMA_OUTPUTS_DIR: outputs
-      # Optionnel: exporter Prometheus si vous le souhaitez
-      # SIGMA_PROM_PORT: "9108"
+      PUSHGATEWAY_URL: ${{ secrets.PUSHGATEWAY_URL }}
+      PROM_JOB: "sigma_llm_ci"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -49,197 +46,227 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install pandas "matplotlib>=3.8" numpy
-          # requis si régénération Sigma-LLM nécessaire :
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install "transformers>=4.42" "accelerate>=0.33" tqdm
+          pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" \
+                      "prometheus-client" # FAISS non requis grâce aux stubs
 
       - name: Ensure dirs exist
         run: |
           mkdir -p "$SIGMA_CONFIGS_DIR" "$SIGMA_STATE_DIR" "$SIGMA_REPORTS_DIR" "$SIGMA_OUTPUTS_DIR"
+          mkdir -p sigma/core
+          [ -f sigma/__init__.py ] || echo "" > sigma/__init__.py
+          [ -f sigma/core/__init__.py ] || echo "" > sigma/core/__init__.py
 
-      # --- (Optionnel/robuste) Régénérer un rapport Sigma-LLM si absent ---
+      - name: Write lightweight core (no-faiss, no-sentence-transformers)
+        shell: bash
+        run: |
+          cat > sigma/core/rag.py <<'PY'
+          import os, json, pathlib
+          def _read_jsonl(p):
+              try:
+                  with open(p, "r", encoding="utf-8") as f:
+                      for line in f:
+                          try: yield json.loads(line).get("text","")
+                          except: pass
+              except: pass
+          def retrieve_topk(query: str, k: int = 3):
+              baseS = pathlib.Path(os.getenv("SIGMA_STATE_DIR","state"))
+              baseC = pathlib.Path(os.getenv("SIGMA_CONFIGS_DIR","configs"))
+              corpus = []
+              for p in [baseS/"corpus.jsonl", baseC/"corpus.jsonl"]:
+                  corpus += list(_read_jsonl(p))
+              if not corpus:
+                  return []
+              q = set(query.lower().split())
+              scored = []
+              for t in corpus:
+                  s = set(t.lower().split())
+                  scored.append((len(q & s), t))
+              scored.sort(reverse=True)
+              return [t for _,t in scored[:k]]
+          PY
+
+          cat > sigma/core/judge.py <<'PY'
+          def judge_factuality(prompt, output, passages):
+              content = " ".join(passages).lower()
+              out = output.lower()
+              words_out = set(out.split())
+              words_ref = set(content.split())
+              denom = max(1, len(words_out))
+              score = min(1.0, len(words_out & words_ref) / denom)
+              return {"score": score}
+          def judge_coherence(output):
+              s = output.strip()
+              score = 0.5
+              if len(s) > 80: score += 0.2
+              if "." in s and "," in s: score += 0.1
+              if "\n" in s: score += 0.1
+              return {"score": min(1.0, score)}
+          PY
+
       - name: Maybe generate Sigma-LLM report (fallback)
         shell: bash
         env:
-          SIGMA_PROMPT_IN: ${{ github.event.inputs.prompt }}
-          SIGMA_MODEL_IN:  ${{ github.event.inputs.model_name }}
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           set -e
-          HAVE_CI="false"
-          [ -f "${SIGMA_REPORTS_DIR}/sigma_llm_ci_report.json" ] && HAVE_CI="true"
-          [ -f "${SIGMA_REPORTS_DIR}/sigma_llm_last_report.json" ] && HAVE_CI="true"
+          PROMPT='${{ github.event.inputs.prompt }}'
+          MODEL='${{ github.event.inputs.model_name }}'
+          [ -z "$PROMPT" ] && PROMPT='Diagnostic quotidien : état réseau & marché.'
+          [ -z "$MODEL" ] && MODEL='gpt2'
 
-          if [ "$HAVE_CI" = "true" ]; then
-            echo "CI report(s) already present. Skipping regeneration."
-            exit 0
-          fi
-
-          # Découvrir le script Sigma-LLM dans le repo
           python - <<'PY'
-          import os, importlib.util, json, sys, pathlib, time
+          import os, importlib.util, pathlib, json, time, sys
           ROOT = pathlib.Path(".")
-          pats = ["sigma_llm_complete.py","sigmacomplettllm.py","sigma_llm*.py","SigmaLLM*.py"]
+          patterns = ["sigma_llm_complete.py","sigmacomplettllm.py","sigma_llm*.py","SigmaLLM*.py"]
           found=[]
-          for p in pats:
-              found += [str(x) for x in ROOT.glob(p)]
+          for patt in patterns: found += [str(p) for p in ROOT.glob(patt)]
           if not found:
-              print("::warning::Aucun script Sigma-LLM trouvé, pas de régénération.")
-              raise SystemExit(0)
-
+              print("::warning:: Aucun script Sigma-LLM trouvé — étape continue (les visuels utiliseront les dernières valeurs).")
+              sys.exit(0)
           script = sorted(found)[0]
           spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
           mod  = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
 
-          prompt = os.environ.get("SIGMA_PROMPT_IN") or "Diagnostic quotidien : état réseau & marché."
-          model  = os.environ.get("SIGMA_MODEL_IN") or "gpt2"
+          prompt = os.getenv("PROMPT_IN","Diagnostic quotidien : état réseau & marché.")
+          model  = os.getenv("MODEL_IN","gpt2")
 
-          if not hasattr(mod, "SigmaLLM"):
-              print("::error::Classe SigmaLLM introuvable dans le script.")
-              raise SystemExit(2)
+          if not hasattr(mod,"SigmaLLM"):
+              print("::error:: Classe SigmaLLM introuvable"); sys.exit(2)
 
           agent = mod.SigmaLLM(model_name=model)
-          text  = agent.generate(f"Human: {prompt}\nAI:")
+          agent.generate(prompt)
 
-          rp = os.environ.get("SIGMA_REPORTS_DIR","reports")
-          pathlib.Path(rp).mkdir(parents=True, exist_ok=True)
-          with open(f"{rp}/sigma_llm_ci_report.json","w",encoding="utf-8") as f:
-              json.dump({
-                "ts": int(time.time()),
-                "prompt": prompt,
-                "model": model,
-                "output_preview": text[-1000:]
-              }, f, indent=2, ensure_ascii=False)
+          RP = os.getenv("SIGMA_REPORTS_DIR","reports")
+          pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
+          last = pathlib.Path(RP)/"sigma_llm_last_report.json"
+          if last.exists():
+              print("Report generated:", last)
+          else:
+              print("::warning:: Pas de last_report écrit par le script.")
           PY
+        env:
+          PROMPT_IN: ${{ github.event.inputs.prompt }}
+          MODEL_IN:  ${{ github.event.inputs.model_name }}
 
-      # --- Ingestion + Visualisation ---
       - name: Build Sigma-Dynamics CSV and Plot
-        id: dyn
         shell: python
         run: |
-          import os, json, pathlib, time
-          import pandas as pd
+          import os, json, csv, time, pathlib
           import matplotlib.pyplot as plt
 
-          CFG  = os.getenv("SIGMA_CONFIGS_DIR","configs")
-          ST   = os.getenv("SIGMA_STATE_DIR","state")
-          RP   = os.getenv("SIGMA_REPORTS_DIR","reports")
-          OUT  = os.getenv("SIGMA_OUTPUTS_DIR","outputs")
-          pathlib.Path(ST).mkdir(exist_ok=True, parents=True)
-          pathlib.Path(RP).mkdir(exist_ok=True, parents=True)
+          OUT= pathlib.Path(os.getenv("SIGMA_OUTPUTS_DIR","outputs")); OUT.mkdir(parents=True, exist_ok=True)
+          RP = pathlib.Path(os.getenv("SIGMA_REPORTS_DIR","reports"))
 
-          # helper
-          def load_json(p, default=None):
-            try:
-              with open(p,"r",encoding="utf-8") as f: return json.load(f)
-            except Exception: return default
-
-          last = load_json(f"{RP}/sigma_llm_last_report.json", {})
-          ci   = load_json(f"{RP}/sigma_llm_ci_report.json", {})
-
-          rows = []
-          if last:
-            rows.append({
-              "ts": last.get("t") or int(time.time()),
-              "S": last.get("S"), "O": last.get("O"),
-              "delta_coh": last.get("delta_coh"),
-              "entropy": last.get("entropy"),
-              "temp": last.get("temp"),
-              "top_p": last.get("top_p"),
-              "model": (last.get("model") or "unknown"),
-              "source": "last_report"
-            })
-          if ci:
-            rows.append({
-              "ts": ci.get("ts") or int(time.time()),
-              "S": None, "O": None, "delta_coh": None,   # pas dans le CI minimal
-              "entropy": None, "temp": None, "top_p": None,
-              "model": ci.get("model") or "unknown",
-              "source": "ci_report"
-            })
-
-          csv_path = pathlib.Path(ST)/"sigma_dynamics.csv"
-          if csv_path.exists():
-            df = pd.read_csv(csv_path)
+          # si aucun rapport dispo, seed par défaut
+          last_path = RP/"sigma_llm_last_report.json"
+          if last_path.exists():
+              last = json.load(open(last_path))
           else:
-            df = pd.DataFrame(columns=["ts","S","O","delta_coh","entropy","temp","top_p","model","source"])
+              last = {"t": int(time.time()), "delta_coh": 0.0, "S": 0.0, "O": 0.0,
+                      "entropy": 0.0, "temp": 1.0, "top_p": 0.95, "meta_gain": 0.0}
 
-          if rows:
-            df_new = pd.DataFrame(rows)
-            df = pd.concat([df, df_new], ignore_index=True)
-            # dédupliquer par (ts, source)
-            df = df.drop_duplicates(subset=["ts","source"], keep="last")
-            df = df.sort_values("ts")
-            df.to_csv(csv_path, index=False)
+          row = {k: last.get(k) for k in ["t","delta_coh","S","O","entropy","temp","top_p","meta_gain"]}
 
-          # Tracé si on a des métriques
-          if not df.empty and df["S"].notna().any():
-            fig = plt.figure(figsize=(10,5))
-            sub = df.dropna(subset=["S","O","delta_coh"]).copy()
-            if not sub.empty:
-              sub["t"] = pd.to_datetime(sub["ts"], unit="s")
-              plt.plot(sub["t"], sub["S"], label="S(t)")
-              plt.plot(sub["t"], sub["O"], label="O(t)")
-              plt.plot(sub["t"], sub["delta_coh"], label="Δcoh")
-              plt.xlabel("time"); plt.ylabel("value"); plt.title("Sigma Dynamics — S/O/Δcoh")
-              plt.legend()
-              img_path = pathlib.Path(RP)/"sigma_dynamics_timeseries.png"
-              plt.tight_layout(); plt.savefig(img_path, dpi=144)
-            else:
-              img_path = None
-          else:
-            img_path = None
+          csv_path = OUT/"sigma_dynamics.csv"
+          write_header = not csv_path.exists()
+          with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(row.keys()))
+            if write_header: w.writeheader()
+            w.writerow(row)
 
-          # Résumé pour le job summary
-          last_row = df.tail(1).to_dict(orient="records")[0] if not df.empty else {}
-          print(f"CSV_PATH={csv_path}")
-          print(f"IMG_PATH={img_path if img_path else ''}")
-          print(f"LAST_ROW={json.dumps(last_row)}")
+          # Plot
+          xs, sS, sO, sD = [], [], [], []
+          with open(csv_path, newline='', encoding='utf-8') as f:
+            r = csv.DictReader(f)
+            for i,R in enumerate(r):
+              xs.append(i+1); sS.append(float(R["S"])); sO.append(float(R["O"])); sD.append(float(R["delta_coh"]))
+          plt.figure()
+          plt.plot(xs, sS, label="S(t)")
+          plt.plot(xs, sO, label="O(t)")
+          plt.plot(xs, sD, label="Δcoh")
+          plt.legend(); plt.title("Sigma Dynamics"); plt.xlabel("Step"); plt.ylabel("Value")
+          plt.savefig(OUT/"sigma_dynamics.png", dpi=160)
 
       - name: Job Summary
         if: always()
         shell: bash
         run: |
-          echo "## Sigma-Dynamics Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Sigma-Dynamics artefacts" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f state/sigma_dynamics.csv ]; then
-            echo "**CSV mis à jour :** \`state/sigma_dynamics.csv\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f reports/sigma_llm_last_report.json ]; then
+            echo 'Dernier rapport :' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            python -c "import json; print(json.dumps(json.load(open('reports/sigma_llm_last_report.json')), indent=2, ensure_ascii=False))" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "_Aucun CSV généré._" >> "$GITHUB_STEP_SUMMARY"
+            echo "_Aucun last_report trouvé (fallback exécuté)._ " >> "$GITHUB_STEP_SUMMARY"
           fi
-          if [ -f reports/sigma_dynamics_timeseries.png ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "![timeseries](reports/sigma_dynamics_timeseries.png)" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '<img src="outputs/sigma_dynamics.png" alt="Sigma Dynamics" />' >> "$GITHUB_STEP_SUMMARY"
 
-      # --- Commit/push des artefacts dans le repo (optionnel mais pratique) ---
       - name: Commit CSV/PNG to repo
         if: always()
         run: |
-          set -e
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add state/sigma_dynamics.csv || true
-          git add reports/sigma_dynamics_timeseries.png || true
-          git add reports/sigma_llm_ci_report.json || true
-          git add reports/sigma_llm_last_report.json || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(sigma-dynamics): update CSV/PNG & reports [skip ci]"
-            git push
-          else
-            echo "Nothing to commit."
-          fi
+          git add outputs/sigma_dynamics.csv outputs/sigma_dynamics.png || true
+          git commit -m "chore(ci): update sigma dynamics [skip ci]" || echo "nothing to commit"
+          git push || true
 
       - name: Upload artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sigma-dynamics_${{ github.run_id }}_${{ github.run_number }}
+          name: sigma_dynamics_${{ github.run_id }}_${{ github.run_number }}
           path: |
-            state/sigma_dynamics.csv
-            reports/sigma_dynamics_timeseries.png
+            outputs/sigma_dynamics.csv
+            outputs/sigma_dynamics.png
             reports/sigma_llm_ci_report.json
             reports/sigma_llm_last_report.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Prepare static site
+        run: |
+          mkdir -p site
+          cp -f outputs/sigma_dynamics.csv site/ || true
+          cp -f outputs/sigma_dynamics.png site/ || true
+          cp -f reports/sigma_llm_ci_report.json site/ || true
+          cp -f reports/sigma_llm_last_report.json site/ || true
+          cat > site/index.html <<'HTML'
+          <!doctype html><html lang="fr"><head>
+          <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+          <title>Sigma Dynamics</title>
+          <style>body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:2rem;line-height:1.5}
+          .wrap{max-width:980px;margin:auto} img{max-width:100%;border:1px solid #ddd;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+          a.btn{display:inline-block;margin:.5rem 0;padding:.6rem .9rem;border:1px solid #e1e3e6;border-radius:10px;text-decoration:none;color:#111;background:#fff}</style>
+          </head><body><div class="wrap">
+          <h1>📈 Sigma Dynamics</h1>
+          <p>Historique S/O/Δcoh produit par Sigma-LLM.</p>
+          <img src="./sigma_dynamics.png" alt="Sigma Dynamics"/>
+          <h2>Fichiers</h2>
+          <ul>
+            <li><a class="btn" href="./sigma_dynamics.csv">sigma_dynamics.csv</a></li>
+            <li><a class="btn" href="./sigma_llm_ci_report.json">sigma_llm_ci_report.json</a></li>
+            <li><a class="btn" href="./sigma_llm_last_report.json">sigma_llm_last_report.json</a></li>
+          </ul>
+          </div></body></html>
+          HTML
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-pages:
+    needs: run
+    runs-on: ubuntu-latest
+    if: always()
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
