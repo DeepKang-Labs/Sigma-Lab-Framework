@@ -366,8 +366,8 @@ class SigmaLLM:
                                    min_sim=si.get("min_similarity_to_store", 0.15))
 
         # --------- Modèle par défaut (performant mais raisonnable CPU)
-        preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-        fallback  = "sshleifer/tiny-gpt2"
+        preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "gpt2")
+        fallback  = "gpt2"
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(preferred)
             self.model     = AutoModelForCausalLM.from_pretrained(preferred)
