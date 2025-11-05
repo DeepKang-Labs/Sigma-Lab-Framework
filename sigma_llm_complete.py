@@ -22,7 +22,7 @@ from collections import deque
 import torch
 from torch import nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from sigma.core.rag import retrieve_topk
+from .core.rag import retrieve_topk
 from sigma.core.judge import judge_factuality, judge_coherence
 import torch.nn.functional as F
 # ---------------------- Dossiers / Fichiers -----------------------------------
