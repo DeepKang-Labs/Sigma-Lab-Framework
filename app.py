@@ -24,7 +24,7 @@ except ModuleNotFoundError:
 import gradio as gr
 
 # Choisis le modèle local (tu peux passer SIGMA_LLM_MODEL=gpt2, meta-llama, etc.)
-MODEL_NAME = os.getenv("SIGMA_LLM_MODEL", "Qwen2.5-7B")
+MODEL_NAME = os.getenv("SIGMA_LLM_MODEL", "gpt2")
 agent = SigmaLLM(model_name=MODEL_NAME)
 
 def chat_fn(message, history):
