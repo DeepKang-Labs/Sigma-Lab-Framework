@@ -468,64 +468,61 @@ class SigmaLLM:
         return self.obj.step(factuality=factuality, coherence=coherence, feedback=feedback, policy=policy)
 
     # ---- Génération principale
-    @torch.no_grad()
-    def generate(self, user_msg: str, max_new_tokens=160) -> str:
-        # 1) Contexte + message
-        self.conv.add("human", user_msg)
-        prompt = self.conv.render() + "\nAI:"
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+@torch.no_grad()
+def generate(self, user_msg: str, max_new_tokens=160) -> str:
+    # 1) Contexte + message
+    self.conv.add("human", user_msg)
+    prompt = self.conv.render() + "\nAI:"
+    inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
 
-        # 2) Entropie & homéostasie
-        entropy = self._entropy_next(inputs)
-        self._adjust_homeostasis(entropy)
+    # 2) Entropie & homéostasie
+    entropy = self._entropy_next(inputs)
+    self._adjust_homeostasis(entropy)
 
-        # 3) Génération
-        out_ids = self.model.generate(
-            **inputs,
-            do_sample=True,
-            max_new_tokens=max_new_tokens,
-            temperature=self.temp,
-            top_p=self.top_p,
-            pad_token_id=self.tokenizer.pad_token_id
-        )[0]
-        text_full = self.tokenizer.decode(out_ids, skip_special_tokens=True)
-        ai_text = text_full.split("\nAI:")[-1].strip()
-        self.conv.add("ai", ai_text)
+    # 3) Génération du texte
+    out_ids = self.model.generate(
+        **inputs,
+        do_sample=True,
+        max_new_tokens=max_new_tokens,
+        temperature=self.temp,
+        top_p=self.top_p,
+        pad_token_id=self.tokenizer.pad_token_id
+    )[0]
+    text_full = self.tokenizer.decode(out_ids, skip_special_tokens=True)
+    ai_text = text_full.split("\nAI:")[-1].strip()
+    self.conv.add("ai", ai_text)
 
-        # 4) Sigma metrics
-    # --- Observations externes (si tu en as besoin plus loin)
+    # 4) Sigma metrics
     external = self.read_external_metrics()
 
-    # --- Recalcule des distributions "réelles" (4D) pour Δcoh
-    # 1) logits du dernier pas pour l'incertitude
+    # a) prédiction interne (intention, croyance, confiance, alignement)
     with torch.no_grad():
         lm_out = self.model(**inputs, labels=inputs["input_ids"])
         last_logits = lm_out.logits[:, -1, :]
 
-    # 2) pred_dist = vie intérieure (intention, croyance, confiance, alignement)
-    pred_intent = self.intention_estimator(user_msg)                 # [0..1]
-    pred_belief = self.belief_state(user_msg)                        # [0..1]
-    pred_conf   = self.uncertainty_measure(last_logits)              # [0..1], 1 = confiant
-    pred_align  = self.alignment_score(user_msg + "\n" + ai_text)    # [0..1]
+    pred_intent = self.intention_estimator(user_msg)
+    pred_belief = self.belief_state(user_msg)
+    pred_conf   = self.uncertainty_measure(last_logits)
+    pred_align  = self.alignment_score(user_msg + "\n" + ai_text)
 
     _pred_raw = torch.tensor([pred_intent, pred_belief, pred_conf, pred_align], dtype=torch.float32)
-    pred_dist = F.softmax(_pred_raw, dim=0).tolist()                 # normalisé
+    pred_dist = F.softmax(_pred_raw, dim=0).tolist()
 
-    # 3) obs_dist = ancrage externe (factualité, cohérence, feedback, conformité)
-    o_fact = self.groundtruth_check(user_msg, ai_text)               # [0..1]
-    o_coh  = self.coherence_validator(ai_text)                       # [0..1]
-    o_fb   = self.user_feedback()                                    # [0..1] (stub si pas de UI)
-    o_pol  = self.policy_compliance(ai_text)                         # [0..1]
+    # b) observation externe (factualité, cohérence, feedback, conformité)
+    o_fact = self.groundtruth_check(user_msg, ai_text)
+    o_coh  = self.coherence_validator(ai_text)
+    o_fb   = self.user_feedback()
+    o_pol  = self.policy_compliance(ai_text)
 
     _obs_raw = torch.tensor([o_fact, o_coh, o_fb, o_pol], dtype=torch.float32)
-    obs_dist = F.softmax(_obs_raw, dim=0).tolist()                   # idem
+    obs_dist = F.softmax(_obs_raw, dim=0).tolist()
 
-    # 4) Σ-métriques
+    # c) Calculs Sigma
     dcoh = self.coh.delta_coh(pred_dist, obs_dist)
     S    = self.subj.step(dcoh)
     O    = self._compute_objectivity(dcoh, ai_text, external)
-
     meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"])))
+
     metrics = SigmaMetrics(
         t=now_ts(),
         delta_coh=dcoh,
@@ -534,13 +531,13 @@ class SigmaLLM:
         meta_gain=meta_gain
     )
 
-    # Invariants + reporting
+    # d) Vérification + journalisation
     inv = self.invar.check(metrics)
     self._write_reports(user_msg, ai_text, metrics, inv)
     self._log_provenance(user_msg, ai_text, metrics, inv)
     self._emit_prom(metrics)
 
-    # Mémoire sémantique (facultatif si pas d’index)
+    # e) Mémoire sémantique (optionnelle)
     try:
         emb = self._embed_text(ai_text)
         self.sidx.add(emb, ai_text)
