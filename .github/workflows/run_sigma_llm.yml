@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # Dossiers standard Sigma-Lab
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
@@ -45,9 +44,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel setuptools
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" "prometheus-client"
+          pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" "prometheus-client" "faiss-cpu"
 
-      # ---- Resolve inputs safely (no YAML logic in env) ----
       - name: Resolve inputs → $GITHUB_ENV
         shell: bash
         run: |
@@ -70,7 +68,6 @@ jobs:
         run: |
           mkdir -p "$SIGMA_CONFIGS_DIR" "$SIGMA_STATE_DIR" "$SIGMA_REPORTS_DIR" "$SIGMA_OUTPUTS_DIR"
           mkdir -p sigma/core
-          # Assure que sigma/ est importable (évite l'erreur 'relative import with no known parent package')
           [ -f sigma/__init__.py ] || echo "" > sigma/__init__.py
           [ -f sigma/core/__init__.py ] || echo "" > sigma/core/__init__.py
 
@@ -79,7 +76,6 @@ jobs:
           CFG = pathlib.Path(os.getenv("SIGMA_CONFIGS_DIR","configs"))
           ST  = pathlib.Path(os.getenv("SIGMA_STATE_DIR","state"))
           RP  = pathlib.Path(os.getenv("SIGMA_REPORTS_DIR","reports"))
-
           CFG.mkdir(parents=True, exist_ok=True)
           ST.mkdir(parents=True, exist_ok=True)
           RP.mkdir(parents=True, exist_ok=True)
@@ -97,8 +93,6 @@ jobs:
                   ],
                   "nu": 0.35,
                   "seuil_veto": 0.08,
-
-                  # ==== Nouveaux paramètres v3.1 ====
                   "subjectivity_decay": 0.002,
                   "O_weights": [0.40, 0.25, 0.20, 0.15],
                   "homeostasis": {
@@ -109,9 +103,7 @@ jobs:
                     "max_items": 2000,
                     "min_similarity_to_store": 0.15
                   },
-                  "conversation_memory": {
-                    "max_turns": 100
-                  },
+                  "conversation_memory": { "max_turns": 100 },
                   "meta": {
                     "source": "DeepSigma_Optimal_Regim_v1.0",
                     "timestamp": "2025-11-03T00:00:00Z",
@@ -135,7 +127,7 @@ jobs:
       - name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
         id: exec_sigma
         env:
-          PYTHONPATH: ${{ github.workspace }}   # important pour les imports "from sigma.core..."
+          PYTHONPATH: ${{ github.workspace }}
           SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
           SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
         shell: bash
@@ -176,20 +168,6 @@ jobs:
           }
           with open(f"{RP}/sigma_llm_ci_report.json","w") as f:
               json.dump(ci_report, f, indent=2, ensure_ascii=False)
-
-          # Lire le dernier rapport pour compter les erreurs d'invariants
-          inv_path = f"{RP}/sigma_llm_last_report.json"
-          inv_errors = 0
-          if os.path.exists(inv_path):
-              try:
-                  data = json.load(open(inv_path))
-                  inv_errors = len(data.get("invariants",{}).get("errors",[]))
-              except Exception as e:
-                  print(f"::warning::Impossible de lire {inv_path}: {e}")
-
-          # Exposer à GitHub Actions
-          with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
-              print(f"inv_errors={inv_errors}", file=gh)
           PY
 
       - name: Pretty-print report to job summary
@@ -197,13 +175,9 @@ jobs:
         shell: bash
         run: |
           echo "### Sigma-LLM CI Report" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f reports/sigma_llm_ci_report.json ]; then
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-            import json
-            print(json.dumps(json.load(open("reports/sigma_llm_ci_report.json")), indent=2, ensure_ascii=False))
-            PY
+            python -c "import json; print(json.dumps(json.load(open('reports/sigma_llm_ci_report.json')), indent=2, ensure_ascii=False))" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "_Aucun rapport généré (étapes précédentes échouées)._ " >> "$GITHUB_STEP_SUMMARY"
