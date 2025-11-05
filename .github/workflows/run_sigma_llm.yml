@@ -1,4 +1,8 @@
-name: Run Sigma-LLM (autodiscover)
+- name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
+  env:
+    PYTHONPATH: ${{ github.workspace }}   # <— important
+  run: |
+    python sigma_llm_complete.py --prompt "ping"
 
 on:
   workflow_dispatch:
