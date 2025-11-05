@@ -63,6 +63,48 @@ def safe_dump_json(path: str, data: Any):
         json.dump(data, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
 
+# ---------------------- Helpers robustes --------------------------------------
+def _clip01(x):
+    try:
+        xf = float(x)
+        return 0.0 if xf < 0 else 1.0 if xf > 1 else xf
+    except Exception:
+        return 0.5
+
+def _coerce_score(obj) -> float:
+    """
+    Convertit un objet arbitraire en score [0,1] de manière robuste.
+    Évite les KeyError quand les modules renvoient d'autres structures.
+    """
+    if obj is None:
+        return 0.5
+    if isinstance(obj, (int, float)):
+        return _clip01(obj)
+    if isinstance(obj, dict):
+        for k in ("score", "confidence", "prob", "p", "value"):
+            if k in obj:
+                return _clip01(obj[k])
+        if "ok" in obj:
+            try:
+                return 1.0 if bool(obj["ok"]) else 0.0
+            except Exception:
+                pass
+        for k in ("components", "parts", "scores"):
+            v = obj.get(k)
+            if isinstance(v, (list, tuple)) and v:
+                nums = [float(x) for x in v if isinstance(x, (int, float))]
+                if nums:
+                    return _clip01(sum(nums)/len(nums))
+        # dernier recours sur somme/moyenne de valeurs numériques du dict
+        nums = [float(v) for v in obj.values() if isinstance(v, (int, float))]
+        if nums:
+            return _clip01(sum(nums)/len(nums))
+    if isinstance(obj, (list, tuple)) and obj:
+        nums = [float(x) for x in obj if isinstance(x, (int, float))]
+        if nums:
+            return _clip01(sum(nums)/len(nums))
+    return 0.5
+
 # ---------------------- Paramètres Sigma par défaut ---------------------------
 DEFAULT_SIGMA_PARAMS: Dict[str, Any] = {
     "alpha": 0.315,
@@ -108,8 +150,7 @@ def load_sigma_params(config_dir: str = CONFIGS_DIR) -> Dict[str, Any]:
         try:
             with open(p, "r", encoding="utf-8") as f:
                 params = json.load(f)
-            # merge léger avec défauts (au cas où une clé manque)
-            merged = DEFAULT_SIGMA_PARAMS | params
+            merged = DEFAULT_SIGMA_PARAMS | params  # merge léger
             print(f"[Sigma] Paramètres chargés depuis {p}")
             return merged
         except Exception as e:
@@ -436,14 +477,27 @@ class SigmaLLM:
         low = any(b in text.lower() for b in bad)
         return 0.2 if low else 0.9
 
+    # --- robustification des juges (évite KeyError "score") -------------------
     def groundtruth_check(self, user_prompt: str, output: str) -> float:
-        passages = retrieve_topk(user_prompt, k=3)
-        judg = judge_factuality(user_prompt, output, passages)
-        return float(judg.get("score", 0.0))
+        try:
+            passages = retrieve_topk(user_prompt, k=3)
+        except Exception as e:
+            print(f"[groundtruth] retrieve_topk fallback: {e}")
+            passages = []
+        try:
+            judg = judge_factuality(user_prompt, output, passages)
+            return _coerce_score(judg)
+        except Exception as e:
+            print(f"[groundtruth] judge_factuality fallback: {e}")
+            return 0.5
 
     def coherence_validator(self, output: str) -> float:
-        judg = judge_coherence(output)
-        return float(judg.get("score", 0.0))
+        try:
+            judg = judge_coherence(output)
+            return _coerce_score(judg)
+        except Exception as e:
+            print(f"[coherence] judge_coherence fallback: {e}")
+            return 0.5
 
     def user_feedback(self) -> float:
         return float(getattr(self, "last_user_feedback", 0.5))
