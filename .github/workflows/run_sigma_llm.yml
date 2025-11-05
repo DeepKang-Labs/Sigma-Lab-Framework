@@ -97,7 +97,8 @@ jobs:
                   ],
                   "nu": 0.35,
                   "seuil_veto": 0.08,
-                  /* ==== Nouveaux paramètres v3.1 ==== */
+
+                  # ==== Nouveaux paramètres v3.1 ====
                   "subjectivity_decay": 0.002,
                   "O_weights": [0.40, 0.25, 0.20, 0.15],
                   "homeostasis": {
@@ -195,15 +196,18 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "### Sigma-LLM CI Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          python - <<'PY' >> $GITHUB_STEP_SUMMARY
-          import json, os
-          p = "reports/sigma_llm_ci_report.json"
-          print(json.dumps(json.load(open(p)), indent=2, ensure_ascii=False))
-          PY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### Sigma-LLM CI Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f reports/sigma_llm_ci_report.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+            import json
+            print(json.dumps(json.load(open("reports/sigma_llm_ci_report.json")), indent=2, ensure_ascii=False))
+            PY
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_Aucun rapport généré (étapes précédentes échouées)._ " >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Fail on invariant errors
         if: steps.exec_sigma.outputs.inv_errors != '0'
