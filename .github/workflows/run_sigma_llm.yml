@@ -8,7 +8,7 @@ on:
         required: false
         default: "Diagnostic quotidien : état réseau & marché."
       model_name:
-        description: "Modèle HF (ex: gpt2, meta-llama/Meta-Llama-3-8B-Instruct, etc.)"
+        description: "Modèle HF (ex: gpt2, TinyLlama/TinyLlama-1.1B-Chat-v1.0, meta-llama/Meta-Llama-3-8B-Instruct, etc.)"
         required: false
         default: "gpt2"
   schedule:
@@ -24,12 +24,15 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     env:
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
       SIGMA_OUTPUTS_DIR: outputs
+      # Définis SIGMA_PROM_PORT si tu veux exposer des métriques Prometheus (ex: 9108)
+      # SIGMA_PROM_PORT: "0"
 
     steps:
       - name: Checkout
@@ -39,6 +42,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -47,6 +51,7 @@ jobs:
           pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" \
                       "prometheus-client" "faiss-cpu" "sentence-transformers"
 
+      # ---- Resolve inputs safely (pas de logique YAML dans env) ---------------
       - name: Resolve inputs → $GITHUB_ENV
         shell: bash
         run: |
@@ -67,6 +72,7 @@ jobs:
       - name: Ensure defaults (configs/state/reports + package init)
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p "$SIGMA_CONFIGS_DIR" "$SIGMA_STATE_DIR" "$SIGMA_REPORTS_DIR" "$SIGMA_OUTPUTS_DIR"
           mkdir -p sigma/core
           [ -f sigma/__init__.py ] || echo "" > sigma/__init__.py
@@ -108,7 +114,7 @@ jobs:
                   "meta": {
                     "source": "DeepSigma_Optimal_Regim_v1.0",
                     "timestamp": "2025-11-03T00:00:00Z",
-                    "description": "Configuration v3.1: ajout subjectivity_decay, O_weights, homeostasis, index sémantique, mémoire conv.",
+                    "description": "Configuration v3.1: subjectivity_decay, O_weights, homeostasis, index sémantique, mémoire conv.",
                     "validated_by": "verify_invariants.yml"
                   }
               }, open(params_path,"w"), indent=2, ensure_ascii=False)
@@ -128,11 +134,12 @@ jobs:
       - name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
         id: exec_sigma
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}   # pour les imports "from sigma.core..."
           SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
           SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
         shell: bash
         run: |
+          set -euo pipefail
           python - <<'PY'
           import os, importlib.util, json, sys, pathlib, time
           ROOT = pathlib.Path(".")
@@ -157,7 +164,8 @@ jobs:
               sys.exit(3)
 
           agent = mod.SigmaLLM(model_name=model)
-          text  = agent.generate(f"Human: {prompt}\nAI:")
+          # IMPORTANT: on passe le prompt brut attendu par generate()
+          text  = agent.generate(prompt)
 
           RP = os.getenv("SIGMA_REPORTS_DIR","reports")
           pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
@@ -167,7 +175,7 @@ jobs:
               "model": model,
               "output_preview": text[-1000:]
           }
-          with open(f"{RP}/sigma_llm_ci_report.json","w") as f:
+          with open(f"{RP}/sigma_llm_ci_report.json","w", encoding="utf-8") as f:
               json.dump(ci_report, f, indent=2, ensure_ascii=False)
           PY
 
@@ -175,14 +183,27 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "### Sigma-LLM CI Report" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f reports/sigma_llm_ci_report.json ]; then
-            echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            python -c "import json; print(json.dumps(json.load(open('reports/sigma_llm_ci_report.json')), indent=2, ensure_ascii=False))" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "_Aucun rapport généré (étapes précédentes échouées)._ " >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "### Sigma-LLM CI Report"
+            echo
+            if [ -f reports/sigma_llm_ci_report.json ]; then
+              echo '```json'
+              python -c "import json; print(json.dumps(json.load(open('reports/sigma_llm_ci_report.json')), indent=2, ensure_ascii=False))"
+              echo '```'
+            else
+              echo "_Aucun rapport généré (étapes précédentes échouées)._"
+            fi
+            echo
+            echo "#### Env (debug)"
+            echo
+            echo '```bash'
+            echo "SIGMA_CONFIGS_DIR=$SIGMA_CONFIGS_DIR"
+            echo "SIGMA_STATE_DIR=$SIGMA_STATE_DIR"
+            echo "SIGMA_REPORTS_DIR=$SIGMA_REPORTS_DIR"
+            echo "SIGMA_OUTPUTS_DIR=$SIGMA_OUTPUTS_DIR"
+            echo "SIGMA_LLM_MODEL=${{ env.SIGMA_LLM_MODEL }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Sigma-LLM report
         if: always()
