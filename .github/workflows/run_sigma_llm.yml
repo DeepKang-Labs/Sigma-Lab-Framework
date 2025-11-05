@@ -1,4 +1,4 @@
-- name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
+name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
 
 on:
   workflow_dispatch:
@@ -8,11 +8,11 @@ on:
         required: false
         default: "Diagnostic quotidien : état réseau & marché."
       model_name:
-        description: "Modèle HF (ex: gpt2, meta-llama/Llama-3-8B-Instruct-GGUF, etc.)"
+        description: "Modèle HF (ex: gpt2, meta-llama/Meta-Llama-3-8B-Instruct, etc.)"
         required: false
         default: "gpt2"
   schedule:
-    - cron: "21 4 * * *" # chaque jour à 04:21 UTC
+    - cron: "21 4 * * *"  # chaque jour à 04:21 UTC
 
 permissions:
   contents: read
@@ -24,11 +24,13 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     env:
       # Dossiers standard Sigma-Lab
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
+      SIGMA_OUTPUTS_DIR: outputs
 
     steps:
       - name: Checkout
@@ -43,7 +45,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel setuptools
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib"
+          pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" "prometheus-client"
 
       # ---- Resolve inputs safely (no YAML logic in env) ----
       - name: Resolve inputs → $GITHUB_ENV
@@ -53,7 +55,6 @@ jobs:
           if [ -z "$PROMPT" ]; then
             PROMPT='Diagnostic quotidien : état réseau & marché.'
           fi
-          # Write multi-line prompt safely
           {
             echo 'SIGMA_PROMPT<<EOF'
             echo "$PROMPT"
@@ -64,43 +65,81 @@ jobs:
           if [ -z "$MODEL" ]; then MODEL='gpt2'; fi
           echo "SIGMA_LLM_MODEL=$MODEL" >> "$GITHUB_ENV"
 
-      - name: Ensure defaults (configs/state/reports)
-        shell: python
+      - name: Ensure defaults (configs/state/reports + package init)
+        shell: bash
         run: |
-          import os, json, pathlib, time
-          CFG=os.getenv("SIGMA_CONFIGS_DIR","configs")
-          ST =os.getenv("SIGMA_STATE_DIR","state")
-          RP =os.getenv("SIGMA_REPORTS_DIR","reports")
-          pathlib.Path(CFG).mkdir(parents=True, exist_ok=True)
-          pathlib.Path(ST).mkdir(parents=True, exist_ok=True)
-          pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
-          params_path = pathlib.Path(CFG)/"sigma_params.json"
+          mkdir -p "$SIGMA_CONFIGS_DIR" "$SIGMA_STATE_DIR" "$SIGMA_REPORTS_DIR" "$SIGMA_OUTPUTS_DIR"
+          mkdir -p sigma/core
+          # Assure que sigma/ est importable (évite l'erreur 'relative import with no known parent package')
+          [ -f sigma/__init__.py ] || echo "" > sigma/__init__.py
+          [ -f sigma/core/__init__.py ] || echo "" > sigma/core/__init__.py
+
+          python - <<'PY'
+          import os, json, time, pathlib
+          CFG = pathlib.Path(os.getenv("SIGMA_CONFIGS_DIR","configs"))
+          ST  = pathlib.Path(os.getenv("SIGMA_STATE_DIR","state"))
+          RP  = pathlib.Path(os.getenv("SIGMA_REPORTS_DIR","reports"))
+
+          CFG.mkdir(parents=True, exist_ok=True)
+          ST.mkdir(parents=True, exist_ok=True)
+          RP.mkdir(parents=True, exist_ok=True)
+
+          params_path = CFG / "sigma_params.json"
           if not params_path.exists():
               json.dump({
-                  "alpha": 0.30, "lambda": 0.20, "gamma": 0.006, "mu": 0.20, "beta": 0.0,
+                  "alpha": 0.315, "beta": 0.0, "gamma": 0.006, "lambda": 0.195, "mu": 0.205,
                   "theta": [0.52, 0.47, 0.41, 0.50],
                   "W": [
-                    [1.0, 0.42, 0.31, 0.55],
-                    [0.42, 1.0, 0.48, 0.63],
-                    [0.31, 0.48, 1.0, 0.58],
-                    [0.55, 0.63, 0.58, 1.0]
-                  ]
+                    [1.00, 0.42, 0.31, 0.55],
+                    [0.42, 1.00, 0.48, 0.63],
+                    [0.31, 0.48, 1.00, 0.58],
+                    [0.55, 0.63, 0.58, 1.00]
+                  ],
+                  "nu": 0.35,
+                  "seuil_veto": 0.08,
+                  /* ==== Nouveaux paramètres v3.1 ==== */
+                  "subjectivity_decay": 0.002,
+                  "O_weights": [0.40, 0.25, 0.20, 0.15],
+                  "homeostasis": {
+                    "temp":  { "min": 0.60, "max": 1.20, "target_entropy": 0.55, "k": 0.15 },
+                    "top_p": { "min": 0.70, "max": 0.98, "target_entropy": 0.55, "k": 0.20 }
+                  },
+                  "semantic_index": {
+                    "max_items": 2000,
+                    "min_similarity_to_store": 0.15
+                  },
+                  "conversation_memory": {
+                    "max_turns": 100
+                  },
+                  "meta": {
+                    "source": "DeepSigma_Optimal_Regim_v1.0",
+                    "timestamp": "2025-11-03T00:00:00Z",
+                    "description": "Configuration v3.1: ajout subjectivity_decay, O_weights, homeostasis, index sémantique, mémoire conv.",
+                    "validated_by": "verify_invariants.yml"
+                  }
               }, open(params_path,"w"), indent=2, ensure_ascii=False)
-          metrics_path = pathlib.Path(ST)/"last_metrics.json"
+
+          metrics_path = ST / "last_metrics.json"
           if not metrics_path.exists():
               json.dump({
                   "sigma_percentage": 0.0,
-                  "final_C": [0.0, 0.0, 0.0, 0.0],
+                  "final_C": [0.55, 0.48, 0.52, 0.50],
                   "final_dC": [0.0, 0.0, 0.0, 0.0],
-                  "rhoA": 0.0,
+                  "rhoA": 2.35,
                   "dt": 0.1,
                   "timestamp": int(time.time())
               }, open(metrics_path,"w"), indent=2, ensure_ascii=False)
+          PY
 
       - name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
         id: exec_sigma
-        shell: python
+        env:
+          PYTHONPATH: ${{ github.workspace }}   # important pour les imports "from sigma.core..."
+          SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
+          SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
+        shell: bash
         run: |
+          python - <<'PY'
           import os, importlib.util, json, sys, pathlib, time
           ROOT = pathlib.Path(".")
           patterns = ["sigma_llm_complete.py", "sigmacomplettllm.py", "sigma_llm*.py", "SigmaLLM*.py"]
@@ -137,6 +176,7 @@ jobs:
           with open(f"{RP}/sigma_llm_ci_report.json","w") as f:
               json.dump(ci_report, f, indent=2, ensure_ascii=False)
 
+          # Lire le dernier rapport pour compter les erreurs d'invariants
           inv_path = f"{RP}/sigma_llm_last_report.json"
           inv_errors = 0
           if os.path.exists(inv_path):
@@ -146,19 +186,22 @@ jobs:
               except Exception as e:
                   print(f"::warning::Impossible de lire {inv_path}: {e}")
 
+          # Exposer à GitHub Actions
           with open(os.environ["GITHUB_OUTPUT"], "a") as gh:
               print(f"inv_errors={inv_errors}", file=gh)
+          PY
 
-      # BONUS #1: Résumé lisible dans l’onglet Summary
       - name: Pretty-print report to job summary
+        if: always()
         shell: bash
         run: |
           echo "### Sigma-LLM CI Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```json' >> $GITHUB_STEP_SUMMARY
           python - <<'PY' >> $GITHUB_STEP_SUMMARY
-          import json
-          print(json.dumps(json.load(open("reports/sigma_llm_ci_report.json")), indent=2, ensure_ascii=False))
+          import json, os
+          p = "reports/sigma_llm_ci_report.json"
+          print(json.dumps(json.load(open(p)), indent=2, ensure_ascii=False))
           PY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
@@ -168,8 +211,8 @@ jobs:
           echo "Invariant errors detected by Sigma-LLM. Failing CI."
           exit 1
 
-      # BONUS #2: Artefacts (report + last_report)
       - name: Upload Sigma-LLM report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sigma_llm_reports_${{ github.run_id }}_${{ github.run_number }}
