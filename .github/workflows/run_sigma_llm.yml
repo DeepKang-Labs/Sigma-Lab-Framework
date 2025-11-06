@@ -62,9 +62,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel setuptools
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" \
-                      "prometheus-client" "faiss-cpu" "sentence-transformers" \
-                      hf_transfer
+          pip install \
+            "transformers>=4.42" "accelerate>=0.33" \
+            "tqdm" "numpy" "matplotlib" \
+            "prometheus-client" "faiss-cpu" "sentence-transformers" \
+            hf_transfer safetensors sentencepiece protobuf einops
 
       # ---- Resolve inputs → $GITHUB_ENV (évite la logique dans YAML) ----------
       - name: Resolve inputs → $GITHUB_ENV
@@ -145,57 +147,90 @@ jobs:
               }, open(metrics_path,"w"), indent=2, ensure_ascii=False)
           PY
 
-      # ---------- EXECUTION DIRECTE: python -u <script> --prompt --model -------
-      - name: Execute Sigma-LLM (python -u direct)
+      # ---------- EXECUTION DIRECTE avec garde de debug ----------
+      - name: Execute Sigma-LLM (python -u direct, debug guard)
         id: exec_sigma
         env:
           PYTHONPATH: ${{ github.workspace }}
           SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
           SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
+          TRANSFORMERS_VERBOSITY: "info"
         shell: bash
         run: |
           set -euo pipefail
+          echo "Python version:"; python -V
 
-          # Autodécouverte (ordre de préférence)
+          echo "Pip check (key libs present?):"
+          python - <<'PY'
+          import pkgutil
+          mods = ["torch","transformers","accelerate","hf_transfer","safetensors","sentencepiece","protobuf","einops"]
+          print({m:bool(pkgutil.find_loader(m)) for m in mods})
+          PY
+
+          echo "Repo tree (top-level):"
+          ls -la
+
+          echo "Search candidate scripts:"
           candidates=( "sigma_llm_complete.py" "sigmacomplettllm.py" )
           for f in sigma_llm*.py SigmaLLM*.py; do
             [ -e "$f" ] && candidates+=("$f")
           done
+          printf ' - %s\n' "${candidates[@]}"
 
           script=""
           for f in "${candidates[@]}"; do
             if [ -f "$f" ]; then script="$f"; break; fi
           done
-
           if [ -z "$script" ]; then
-            echo "::error::Aucun script Sigma-LLM trouvé (sigma_llm*.py / SigmaLLM*.py)."
+            echo "::error::Aucun script Sigma-LLM trouvé. Vérifie le nom exact du fichier."
+            echo "Contenu détecté :"; find . -maxdepth 2 -type f -name "*.py" -print
             exit 2
           fi
 
           echo "Using Sigma-LLM script: $script"
           mkdir -p "$SIGMA_OUTPUTS_DIR" "$SIGMA_REPORTS_DIR"
 
-          # Exécution non-bufferisée
+          echo ">>> Running LLM with model='${SIGMA_LLM_MODEL}'"
+          set -x
           python -u "$script" --prompt "$SIGMA_PROMPT" --model "$SIGMA_LLM_MODEL"
+          set +x
+
+          OUT="outputs/latest_output.txt"
+          if [ ! -f "$OUT" ]; then
+            echo "::warning::'$OUT' introuvable. On liste outputs/ :"
+            ls -la outputs || true
+          fi
+
+          if [ -s "$OUT" ]; then
+            echo "OK: sortie trouvée ($OUT)."
+          else
+            echo "::warning::Sortie vide ou absente. Diagnostic rapide:"
+            [ -f reports/sigma_llm_last_report.json ] && \
+              (echo "--- reports/sigma_llm_last_report.json ---"; cat reports/sigma_llm_last_report.json)
+            [ -f reports/sigma_llm_provenance.jsonl ] && \
+              (echo "--- tail reports/sigma_llm_provenance.jsonl ---"; tail -n 5 reports/sigma_llm_provenance.jsonl)
+            echo "::error::Le LLM n'a pas produit de texte exploitable."
+            exit 3
+          fi
 
           # Petit rapport CI (aperçu) pour le Summary
           python - <<'PY'
-          import os, json, time
+          import os, json, time, pathlib
           RP  = os.getenv("SIGMA_REPORTS_DIR","reports")
-          OUT = os.path.join(os.getenv("SIGMA_OUTPUTS_DIR","outputs"), "latest_output.txt")
-          PREVIEW = ""
+          OUT = pathlib.Path(os.getenv("SIGMA_OUTPUTS_DIR","outputs")) / "latest_output.txt"
+          OUT.parent.mkdir(parents=True, exist_ok=True)
           try:
-            PREVIEW = open(OUT, "r", encoding="utf-8").read()[-1000:]
+              preview = OUT.read_text(encoding="utf-8")[-1000:]
           except Exception:
-            PREVIEW = "(no latest_output.txt)"
-          os.makedirs(RP, exist_ok=True)
+              preview = "(no latest_output.txt)"
+          pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
           with open(os.path.join(RP, "sigma_llm_ci_report.json"), "w", encoding="utf-8") as f:
-            json.dump({
-              "ts": int(time.time()),
-              "prompt": os.getenv("SIGMA_PROMPT","(n/a)"),
-              "model": os.getenv("SIGMA_LLM_MODEL","(n/a)"),
-              "output_preview": PREVIEW
-            }, f, indent=2, ensure_ascii=False)
+              json.dump({
+                "ts": int(time.time()),
+                "prompt": os.getenv("SIGMA_PROMPT","(n/a)"),
+                "model": os.getenv("SIGMA_LLM_MODEL","(n/a)"),
+                "output_preview": preview
+              }, f, indent=2, ensure_ascii=False)
           PY
 
       - name: Show full output (head/tail)
