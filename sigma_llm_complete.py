@@ -379,7 +379,7 @@ class SigmaLLM:
                                    min_sim=si.get("min_similarity_to_store", 0.15))
 
         # --------- Modèle par défaut (performant mais raisonnable CPU)
-        preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "gpt2")
+        preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
         fallback  = "gpt2"
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(preferred)
