@@ -24,7 +24,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # Llama-3 8B est volumineux
+    timeout-minutes: 90   # Llama-3 8B est volumineux et lent en CPU
 
     env:
       # Dossiers projet
@@ -62,6 +62,24 @@ jobs:
             "tqdm" "numpy" "matplotlib" \
             "prometheus-client" "faiss-cpu" "sentence-transformers" \
             hf_transfer safetensors sentencepiece protobuf einops huggingface_hub
+
+      - name: Login to Hugging Face (for gated models)
+        env:
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "${HUGGING_FACE_HUB_TOKEN:-}" ]; then
+            echo "::warning::No HF token provided (secrets.HF_TOKEN). Gated models like Meta-Llama-3 will 401."
+            exit 0
+          fi
+          python - <<'PY'
+import os, sys, subprocess
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "huggingface_hub>=0.24"], check=True)
+from huggingface_hub import login
+tok = os.environ.get("HUGGING_FACE_HUB_TOKEN","").strip()
+login(token=tok, add_to_git_credential=True)
+print("[HF] Auth OK")
+PY
 
       # ---- Resolve inputs → $GITHUB_ENV --------------------------------------
       - name: Resolve inputs → $GITHUB_ENV
@@ -144,7 +162,6 @@ jobs:
           SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
           SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
           TRANSFORMERS_VERBOSITY: "info"
-          # Secrets HF (ajoute un secret repo 'HF_TOKEN' côté GitHub)
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         shell: bash
@@ -164,7 +181,6 @@ jobs:
           echo "Using Sigma-LLM script: $script"
           mkdir -p "$SIGMA_OUTPUTS_DIR" "$SIGMA_REPORTS_DIR"
 
-          # Exécution Python avec fallback si OOM/erreur chargement
           python - <<'PY'
           import os, importlib.util, json, time, sys, gc, traceback
           model  = os.getenv("SIGMA_LLM_MODEL","meta-llama/Meta-Llama-3-8B-Instruct")
@@ -174,8 +190,10 @@ jobs:
           outpath = os.path.join(outdir, "latest_output.txt")
 
           # import du module
-          script_candidates = [p for p in os.listdir(".") if p.startswith("sigma_llm") and p.endswith(".py")]
-          script = sorted(script_candidates)[0]
+          candidates = [p for p in os.listdir(".") if p.startswith("sigma_llm") and p.endswith(".py")]
+          if not candidates:
+              print("::error::No sigma_llm*.py found", flush=True); sys.exit(2)
+          script = sorted(candidates)[0]
           spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
           mod  = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
