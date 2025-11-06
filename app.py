@@ -23,8 +23,8 @@ def import_sigma_llm():
 SigmaLLM = import_sigma_llm()
 
 # --- Choix du modèle (env ou défauts sûrs CPU) ---
-MODEL_NAME = os.getenv("SIGMA_LLM_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-FALLBACK   = "sshleifer/tiny-gpt2"
+MODEL_NAME = os.getenv("SIGMA_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
+FALLBACK   = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 # --- Instanciation agent avec fallback + logs ---
 def make_agent():
@@ -70,7 +70,7 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
         chatbot=gr.Chatbot(height=420),
         textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True),
         title="Sigma-LLM",
-        description="Agent réflexif CPU-friendly (TinyLlama/GPT-2 fallback)."
+        description="Agent réflexif CPU-friendly (meta-llama/Meta-Llama-3-8B-Instruct)."
     )
 
 if __name__ == "__main__":
