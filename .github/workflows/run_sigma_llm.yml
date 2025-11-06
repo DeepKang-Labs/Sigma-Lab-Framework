@@ -247,10 +247,3 @@ jobs:
             state/episodes.jsonl
           if-no-files-found: warn
           retention-days: 14
-
-      # (Optionnel) Nettoyage pour éviter un disque runner saturé
-      - name: Free HF cache (optional)
-        if: always()
-        run: |
-          sudo rm -rf ~/.cache/pip || true
-          sudo rm -rf "$HF_HOME" || true
