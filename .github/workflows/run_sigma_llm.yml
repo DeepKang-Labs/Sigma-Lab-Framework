@@ -8,9 +8,9 @@ on:
         required: false
         default: "Diagnostic quotidien : état réseau & marché."
       model_name:
-        description: "Modèle HF (ex: gpt2, TinyLlama/TinyLlama-1.1B-Chat-v1.0, meta-llama/Meta-Llama-3-8B-Instruct, etc.)"
+        description: "Modèle HF (ex: meta-llama/Meta-Llama-3-8B-Instruct)"
         required: false
-        default: "gpt2"
+        default: "meta-llama/Meta-Llama-3-8B-Instruct"
   schedule:
     - cron: "21 4 * * *"  # chaque jour à 04:21 UTC
 
@@ -83,7 +83,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
           MODEL='${{ github.event.inputs.model_name }}'
-          if [ -z "$MODEL" ]; then MODEL='gpt2'; fi
+          if [ -z "$MODEL" ]; then MODEL='meta-llama/Meta-Llama-3-8B-Instruct'; fi
           echo "SIGMA_LLM_MODEL=$MODEL" >> "$GITHUB_ENV"
 
       - name: Ensure defaults (configs/state/reports + package init)
