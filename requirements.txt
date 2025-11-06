@@ -1,15 +1,32 @@
-# --- Sigma-Lab runtime deps ---
-fastapi==0.115.2
-uvicorn[standard]==0.30.6
-requests==2.32.3
-PyYAML==6.0.2
-python-multipart==0.0.9
-pydantic==2.9.2
-torch>=2.0
-transformers>=4.35
+# --- Core runtime ---
+requests>=2.32.3
+PyYAML>=6.0.2
+python-multipart>=0.0.9
+pydantic>=2.9.2
+jsonschema>=4.23.0
+tqdm>=4.66.0
+
+# --- Data & viz ---
 numpy>=1.26
-pandas
-accelerate
-gradio
+pandas>=2.2
+scipy>=1.11
+matplotlib>=3.8
+
+# --- Web / UI (Gradio) ---
+gradio>=4.31
+prometheus-client>=0.19
+
+# --- LLM stack (CPU) ---
+# Astuce: si l'installation de torch échoue, installe-le à part avec:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.3.1
+torch==2.3.1
+transformers==4.43.3
+accelerate==0.33.0
 sentence-transformers==3.0.1
 faiss-cpu==1.8.0
+huggingface-hub>=0.23
+safetensors>=0.4.2
+
+# --- (Optionnel) API FastAPI si tu exposes un endpoint HTTP ---
+fastapi>=0.115.2
+uvicorn[standard]>=0.30.6
