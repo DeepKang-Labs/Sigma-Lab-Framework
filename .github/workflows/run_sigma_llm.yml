@@ -38,7 +38,7 @@ jobs:
 
       # Envs qualité/logs Transformers/HF
       HF_HUB_DISABLE_TELEMETRY: "1"
-      HF_HUB_ENABLE_HF_TRANSFER: "1"
+      HF_HUB_ENABLE_HF_TRANSFER: "1"   # nécessite le paquet hf_transfer
       TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
       TOKENIZERS_PARALLELISM: "false"
 
@@ -63,7 +63,8 @@ jobs:
           python -m pip install --upgrade pip wheel setuptools
           pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" \
-                      "prometheus-client" "faiss-cpu" "sentence-transformers"
+                      "prometheus-client" "faiss-cpu" "sentence-transformers" \
+                      hf_transfer
 
       # ---- Resolve inputs → $GITHUB_ENV (évite la logique dans YAML) ----------
       - name: Resolve inputs → $GITHUB_ENV
