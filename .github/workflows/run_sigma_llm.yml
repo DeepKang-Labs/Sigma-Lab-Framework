@@ -31,8 +31,8 @@ jobs:
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
       SIGMA_OUTPUTS_DIR: outputs
-      # Définis SIGMA_PROM_PORT si tu veux exposer des métriques Prometheus (ex: 9108)
-      # SIGMA_PROM_PORT: "0"
+      PYTHONUNBUFFERED: "1"   # <-- IMPORTANT: pas de buffering des sorties
+      # SIGMA_PROM_PORT: "0"  # optionnel: métriques Prometheus
 
     steps:
       - name: Checkout
@@ -164,7 +164,6 @@ jobs:
               sys.exit(3)
 
           agent = mod.SigmaLLM(model_name=model)
-          # IMPORTANT: on passe le prompt brut attendu par generate()
           text  = agent.generate(prompt)
 
           RP = os.getenv("SIGMA_REPORTS_DIR","reports")
@@ -178,6 +177,16 @@ jobs:
           with open(f"{RP}/sigma_llm_ci_report.json","w", encoding="utf-8") as f:
               json.dump(ci_report, f, indent=2, ensure_ascii=False)
           PY
+
+      - name: Show full output (head/tail)
+        if: always()
+        shell: bash
+        run: |
+          echo "=== HEAD outputs/latest_output.txt ==="
+          head -n 30 "outputs/latest_output.txt" || echo "(fichier introuvable)"
+          echo
+          echo "=== TAIL outputs/latest_output.txt ==="
+          tail -n 30 "outputs/latest_output.txt" || echo "(fichier introuvable)"
 
       - name: Pretty-print report to job summary
         if: always()
@@ -205,13 +214,16 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Sigma-LLM report
+      - name: Upload Sigma-LLM artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sigma_llm_reports_${{ github.run_id }}_${{ github.run_number }}
           path: |
+            outputs/latest_output.txt
             reports/sigma_llm_ci_report.json
             reports/sigma_llm_last_report.json
+            reports/sigma_llm_provenance.jsonl
+            state/episodes.jsonl
           if-no-files-found: warn
           retention-days: 14
