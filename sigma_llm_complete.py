@@ -10,14 +10,23 @@ Sigma-LLM v3.2 — DeepKang Integration (single-file, production-ready)
 ✅ Branches "features réelles" si des fichiers existent dans state/
 ✅ Export Prometheus (SIGMA_PROM_PORT) pour Grafana
 ✅ Fallback modèle auto si TinyLlama ne charge pas
+✅ CI-safe: sortie non-bufferisée, artefacts complets, résumé GHA
 
 Dépendances: transformers, torch, (optionnel) prometheus_client
 """
 
-import os, json, math, time, hashlib, threading, pathlib
+import os, json, math, time, hashlib, threading, pathlib, sys
 from dataclasses import dataclass
 from typing import Dict, List, Any, Deque, Tuple
 from collections import deque
+
+# --- Unbuffered stdout pour Actions / CI ---
+try:
+    # Python >=3.7
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+os.environ["PYTHONUNBUFFERED"] = "1"
 
 import torch
 from torch import nn
@@ -43,6 +52,10 @@ LAST_REPORT   = os.path.join(REPORTS_DIR, "sigma_llm_last_report.json")
 EPISODES_FILE = os.path.join(STATE_DIR,   "episodes.jsonl")
 CONV_FILE     = os.path.join(STATE_DIR,   "conversation.json")
 SEMIDX_FILE   = os.path.join(STATE_DIR,   "semantic_index.jsonl")
+
+# CI: chemins/vars pour sortie complète et résumé GitHub Actions
+RAW_OUT_TXT = os.path.join(OUTPUTS_DIR, "latest_output.txt")
+STEP_SUMMARY = os.getenv("GITHUB_STEP_SUMMARY")
 
 # Optionnel: port d’export Prometheus (ex: 9108). 0/absent = désactivé
 PROM_PORT = int(os.getenv("SIGMA_PROM_PORT", "0"))
@@ -585,7 +598,6 @@ class SigmaLLM:
         inv = self.invar.check(metrics)
         self._write_reports(user_msg, ai_text, metrics, inv)
         self._log_provenance(user_msg, ai_text, metrics, inv)
-        _emit_prom(metrics)
 
         # f) Mémoire sémantique (optionnelle)
         try:
@@ -593,6 +605,9 @@ class SigmaLLM:
             self.sidx.add(emb, ai_text)
         except Exception:
             pass
+
+        # g) CI: écrire sortie complète + résumé pour GitHub Actions
+        self._write_full_outputs_and_summary(user_msg, ai_text, getattr(self, "model_name", "unknown"))
 
         return ai_text
 
@@ -602,7 +617,9 @@ class SigmaLLM:
             "t": m.t, "delta_coh": m.delta_coh, "S": m.S, "O": m.O,
             "meta_gain": m.meta_gain, "entropy": m.entropy,
             "temp": m.temp, "top_p": m.top_p, "invariants": inv,
-            "model": getattr(self, "model_name", "unknown")
+            "model": getattr(self, "model_name", "unknown"),
+            "prompt": prompt[-2000:],           # NEW: inclure prompt
+            "output": output[-8000:]            # NEW: inclure sortie (quasi complète)
         }
         safe_dump_json(LAST_REPORT, rep)
         with open(EPISODES_FILE, "a", encoding="utf-8") as f:
@@ -622,6 +639,41 @@ class SigmaLLM:
         }
         with open(PROV_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    # ---------------------- CI helpers (full output + summary) ----------------
+    def _write_full_outputs_and_summary(self, prompt: str, output: str, model_name: str):
+        # 1) fichier texte complet (artefact)
+        try:
+            os.makedirs(OUTPUTS_DIR, exist_ok=True)
+            with open(RAW_OUT_TXT, "w", encoding="utf-8") as f:
+                f.write(output)
+        except Exception as e:
+            print(f"[CI] write RAW_OUT_TXT failed: {e}")
+
+        # 2) petit résumé pour l’onglet Summary (aperçu)
+        preview = (output[:160] + "…") if len(output) > 160 else output
+        payload = {
+            "ts": now_ts(),
+            "prompt": (prompt[:200] + "…") if len(prompt) > 200 else prompt,
+            "model": model_name,
+            "output_preview": preview
+        }
+        if STEP_SUMMARY:
+            try:
+                with open(STEP_SUMMARY, "a", encoding="utf-8") as s:
+                    s.write("## Sigma–LLM CI Report\n\n```json\n")
+                    s.write(json.dumps(payload, ensure_ascii=False, indent=2))
+                    s.write("\n```\n")
+            except Exception as e:
+                print(f"[Summary] write failed: {e}")
+
+        # 3) flush console (évite troncature de log)
+        print("=== SIGMA-LLM OUTPUT (preview) ===")
+        print(preview)
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
 
 # ---------------------- CLI ----------------------------------------------------
 if __name__ == "__main__":
