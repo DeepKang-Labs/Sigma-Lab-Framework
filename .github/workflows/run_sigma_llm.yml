@@ -27,12 +27,26 @@ jobs:
     timeout-minutes: 30
 
     env:
+      # Dossiers projet
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
       SIGMA_OUTPUTS_DIR: outputs
-      PYTHONUNBUFFERED: "1"   # sorties non-bufferisées
-      # SIGMA_PROM_PORT: "0"  # optionnel: Prometheus
+
+      # Sorties non-bufferisées
+      PYTHONUNBUFFERED: "1"
+
+      # Envs qualité/logs Transformers/HF
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+
+      # Cache local HF pour accélérer les runs
+      HF_HOME: ${{ github.workspace }}/.hf_cache
+
+      # (optionnel) Prometheus pour export métriques
+      # SIGMA_PROM_PORT: "0"
 
     steps:
       - name: Checkout
@@ -51,6 +65,7 @@ jobs:
           pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" \
                       "prometheus-client" "faiss-cpu" "sentence-transformers"
 
+      # ---- Resolve inputs → $GITHUB_ENV (évite la logique dans YAML) ----------
       - name: Resolve inputs → $GITHUB_ENV
         shell: bash
         run: |
@@ -82,9 +97,8 @@ jobs:
           CFG = pathlib.Path(os.getenv("SIGMA_CONFIGS_DIR","configs"))
           ST  = pathlib.Path(os.getenv("SIGMA_STATE_DIR","state"))
           RP  = pathlib.Path(os.getenv("SIGMA_REPORTS_DIR","reports"))
-          CFG.mkdir(parents=True, exist_ok=True)
-          ST.mkdir(parents=True, exist_ok=True)
-          RP.mkdir(parents=True, exist_ok=True)
+          OUT = pathlib.Path(os.getenv("SIGMA_OUTPUTS_DIR","outputs"))
+          for p in (CFG, ST, RP, OUT): p.mkdir(parents=True, exist_ok=True)
 
           params_path = CFG / "sigma_params.json"
           if not params_path.exists():
@@ -141,19 +155,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Autodécouverte de fichier (ordre de préférence)
+          # Autodécouverte (ordre de préférence)
           candidates=( "sigma_llm_complete.py" "sigmacomplettllm.py" )
-          # Ajoute les glob dynamiques (résistent si aucun match)
           for f in sigma_llm*.py SigmaLLM*.py; do
             [ -e "$f" ] && candidates+=("$f")
           done
 
           script=""
           for f in "${candidates[@]}"; do
-            if [ -f "$f" ]; then
-              script="$f"
-              break
-            fi
+            if [ -f "$f" ]; then script="$f"; break; fi
           done
 
           if [ -z "$script" ]; then
@@ -164,7 +174,7 @@ jobs:
           echo "Using Sigma-LLM script: $script"
           mkdir -p "$SIGMA_OUTPUTS_DIR" "$SIGMA_REPORTS_DIR"
 
-          # Exécution non-bufferisée (+ flush forcé côté script)
+          # Exécution non-bufferisée
           python -u "$script" --prompt "$SIGMA_PROMPT" --model "$SIGMA_LLM_MODEL"
 
           # Petit rapport CI (aperçu) pour le Summary
@@ -174,19 +184,17 @@ jobs:
           OUT = os.path.join(os.getenv("SIGMA_OUTPUTS_DIR","outputs"), "latest_output.txt")
           PREVIEW = ""
           try:
-            PREVIEW = open(OUT, "r", encoding="utf-8").read()
-            PREVIEW = PREVIEW[-1000:]
+            PREVIEW = open(OUT, "r", encoding="utf-8").read()[-1000:]
           except Exception:
             PREVIEW = "(no latest_output.txt)"
-          ci = {
-            "ts": int(time.time()),
-            "prompt": os.getenv("SIGMA_PROMPT","(n/a)"),
-            "model": os.getenv("SIGMA_LLM_MODEL","(n/a)"),
-            "output_preview": PREVIEW
-          }
           os.makedirs(RP, exist_ok=True)
           with open(os.path.join(RP, "sigma_llm_ci_report.json"), "w", encoding="utf-8") as f:
-            json.dump(ci, f, indent=2, ensure_ascii=False)
+            json.dump({
+              "ts": int(time.time()),
+              "prompt": os.getenv("SIGMA_PROMPT","(n/a)"),
+              "model": os.getenv("SIGMA_LLM_MODEL","(n/a)"),
+              "output_preview": PREVIEW
+            }, f, indent=2, ensure_ascii=False)
           PY
 
       - name: Show full output (head/tail)
@@ -238,3 +246,10 @@ jobs:
             state/episodes.jsonl
           if-no-files-found: warn
           retention-days: 14
+
+      # (Optionnel) Nettoyage pour éviter un disque runner saturé
+      - name: Free disk space (optional)
+        if: always()
+        run: |
+          sudo rm -rf ~/.cache/pip || true
+          sudo rm -rf "$HF_HOME" || true
