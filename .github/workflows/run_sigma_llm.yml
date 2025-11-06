@@ -1,4 +1,4 @@
-name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
+name: Execute Sigma-LLM (Meta-Llama-3-8B-Instruct ready)
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90   # Llama-3 8B est volumineux
 
     env:
       # Dossiers projet
@@ -36,17 +36,12 @@ jobs:
       # Sorties non-bufferisées
       PYTHONUNBUFFERED: "1"
 
-      # Envs qualité/logs Transformers/HF
+      # Accélération / stabilité HF
+      HF_HOME: ${{ github.workspace }}/.hf_cache
       HF_HUB_DISABLE_TELEMETRY: "1"
       HF_HUB_ENABLE_HF_TRANSFER: "1"   # nécessite le paquet hf_transfer
       TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
       TOKENIZERS_PARALLELISM: "false"
-
-      # Cache local HF pour accélérer les runs
-      HF_HOME: ${{ github.workspace }}/.hf_cache
-
-      # (optionnel) Prometheus pour export métriques
-      # SIGMA_PROM_PORT: "0"
 
     steps:
       - name: Checkout
@@ -66,9 +61,9 @@ jobs:
             "transformers>=4.42" "accelerate>=0.33" \
             "tqdm" "numpy" "matplotlib" \
             "prometheus-client" "faiss-cpu" "sentence-transformers" \
-            hf_transfer safetensors sentencepiece protobuf einops
+            hf_transfer safetensors sentencepiece protobuf einops huggingface_hub
 
-      # ---- Resolve inputs → $GITHUB_ENV (évite la logique dans YAML) ----------
+      # ---- Resolve inputs → $GITHUB_ENV --------------------------------------
       - name: Resolve inputs → $GITHUB_ENV
         shell: bash
         run: |
@@ -126,13 +121,7 @@ jobs:
                     "max_items": 2000,
                     "min_similarity_to_store": 0.15
                   },
-                  "conversation_memory": { "max_turns": 100 },
-                  "meta": {
-                    "source": "DeepSigma_Optimal_Regim_v1.0",
-                    "timestamp": "2025-11-03T00:00:00Z",
-                    "description": "Configuration v3.1: subjectivity_decay, O_weights, homeostasis, index sémantique, mémoire conv.",
-                    "validated_by": "verify_invariants.yml"
-                  }
+                  "conversation_memory": { "max_turns": 100 }
               }, open(params_path,"w"), indent=2, ensure_ascii=False)
 
           metrics_path = ST / "last_metrics.json"
@@ -147,91 +136,95 @@ jobs:
               }, open(metrics_path,"w"), indent=2, ensure_ascii=False)
           PY
 
-      # ---------- EXECUTION DIRECTE avec garde de debug ----------
-      - name: Execute Sigma-LLM (python -u direct, debug guard)
+      # ---------- EXECUTION (Llama-3 avec fallback TinyLlama) ------------------
+      - name: Execute Sigma-LLM (Llama-3 with safe fallback)
         id: exec_sigma
         env:
           PYTHONPATH: ${{ github.workspace }}
           SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
           SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
           TRANSFORMERS_VERBOSITY: "info"
+          # Secrets HF (ajoute un secret repo 'HF_TOKEN' côté GitHub)
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "Python version:"; python -V
+          echo "Python:"; python -V
+          echo "Env MODEL=${SIGMA_LLM_MODEL}"
 
-          echo "Pip check (key libs present?):"
-          python - <<'PY'
-          import pkgutil
-          mods = ["torch","transformers","accelerate","hf_transfer","safetensors","sentencepiece","protobuf","einops"]
-          print({m:bool(pkgutil.find_loader(m)) for m in mods})
-          PY
-
-          echo "Repo tree (top-level):"
-          ls -la
-
-          echo "Search candidate scripts:"
-          candidates=( "sigma_llm_complete.py" "sigmacomplettllm.py" )
-          for f in sigma_llm*.py SigmaLLM*.py; do
-            [ -e "$f" ] && candidates+=("$f")
-          done
-          printf ' - %s\n' "${candidates[@]}"
-
-          script=""
-          for f in "${candidates[@]}"; do
-            if [ -f "$f" ]; then script="$f"; break; fi
-          done
+          # Trouver le script Sigma
+          script=$( (ls -1 sigma_llm_complete.py 2>/dev/null || true) ; \
+                    (ls -1 sigmacomplettllm.py 2>/dev/null || true) ; \
+                    ls -1 sigma_llm*.py 2>/dev/null | head -n 1 )
           if [ -z "$script" ]; then
-            echo "::error::Aucun script Sigma-LLM trouvé. Vérifie le nom exact du fichier."
-            echo "Contenu détecté :"; find . -maxdepth 2 -type f -name "*.py" -print
+            echo "::error::Aucun script Sigma-LLM trouvé."; find . -maxdepth 2 -name "*.py" -print
             exit 2
           fi
-
           echo "Using Sigma-LLM script: $script"
           mkdir -p "$SIGMA_OUTPUTS_DIR" "$SIGMA_REPORTS_DIR"
 
-          echo ">>> Running LLM with model='${SIGMA_LLM_MODEL}'"
-          set -x
-          python -u "$script" --prompt "$SIGMA_PROMPT" --model "$SIGMA_LLM_MODEL"
-          set +x
-
-          OUT="outputs/latest_output.txt"
-          if [ ! -f "$OUT" ]; then
-            echo "::warning::'$OUT' introuvable. On liste outputs/ :"
-            ls -la outputs || true
-          fi
-
-          if [ -s "$OUT" ]; then
-            echo "OK: sortie trouvée ($OUT)."
-          else
-            echo "::warning::Sortie vide ou absente. Diagnostic rapide:"
-            [ -f reports/sigma_llm_last_report.json ] && \
-              (echo "--- reports/sigma_llm_last_report.json ---"; cat reports/sigma_llm_last_report.json)
-            [ -f reports/sigma_llm_provenance.jsonl ] && \
-              (echo "--- tail reports/sigma_llm_provenance.jsonl ---"; tail -n 5 reports/sigma_llm_provenance.jsonl)
-            echo "::error::Le LLM n'a pas produit de texte exploitable."
-            exit 3
-          fi
-
-          # Petit rapport CI (aperçu) pour le Summary
+          # Exécution Python avec fallback si OOM/erreur chargement
           python - <<'PY'
-          import os, json, time, pathlib
-          RP  = os.getenv("SIGMA_REPORTS_DIR","reports")
-          OUT = pathlib.Path(os.getenv("SIGMA_OUTPUTS_DIR","outputs")) / "latest_output.txt"
-          OUT.parent.mkdir(parents=True, exist_ok=True)
+          import os, importlib.util, json, time, sys, gc, traceback
+          model  = os.getenv("SIGMA_LLM_MODEL","meta-llama/Meta-Llama-3-8B-Instruct")
+          prompt = os.getenv("SIGMA_PROMPT","Diagnostic quotidien : état réseau & marché.")
+          outdir = os.getenv("SIGMA_OUTPUTS_DIR","outputs")
+          os.makedirs(outdir, exist_ok=True)
+          outpath = os.path.join(outdir, "latest_output.txt")
+
+          # import du module
+          script_candidates = [p for p in os.listdir(".") if p.startswith("sigma_llm") and p.endswith(".py")]
+          script = sorted(script_candidates)[0]
+          spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
+          mod  = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+
+          def run_with(model_name:str):
+            print(f"[Sigma-LLM] Loading model: {model_name}", flush=True)
+            agent = mod.SigmaLLM(model_name=model_name)
+            print(f"[Sigma-LLM] Generating...", flush=True)
+            txt = agent.generate(prompt)
+            with open(outpath, "w", encoding="utf-8") as f:
+              f.write(txt)
+            print(f"[Sigma-LLM] Wrote -> {outpath}", flush=True)
+
           try:
-              preview = OUT.read_text(encoding="utf-8")[-1000:]
+            run_with(model)
+          except Exception as e:
+            print(f"[Warn] primary model failed: {e}\n{traceback.format_exc()}", flush=True)
+            print("[Sigma-LLM] Fallback -> TinyLlama/TinyLlama-1.1B-Chat-v1.0", flush=True)
+            gc.collect()
+            try:
+              run_with("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+            except Exception as e2:
+              print(f"[Error] fallback failed: {e2}\n{traceback.format_exc()}", flush=True)
+              sys.exit(3)
+
+          # CI report (aperçu)
+          rp = os.getenv("SIGMA_REPORTS_DIR","reports")
+          os.makedirs(rp, exist_ok=True)
+          preview = "(empty)"
+          try:
+            preview = open(outpath,"r",encoding="utf-8").read()[-1000:]
           except Exception:
-              preview = "(no latest_output.txt)"
-          pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
-          with open(os.path.join(RP, "sigma_llm_ci_report.json"), "w", encoding="utf-8") as f:
-              json.dump({
-                "ts": int(time.time()),
-                "prompt": os.getenv("SIGMA_PROMPT","(n/a)"),
-                "model": os.getenv("SIGMA_LLM_MODEL","(n/a)"),
-                "output_preview": preview
-              }, f, indent=2, ensure_ascii=False)
+            pass
+          with open(os.path.join(rp, "sigma_llm_ci_report.json"), "w", encoding="utf-8") as f:
+            json.dump({
+              "ts": int(time.time()),
+              "prompt": prompt,
+              "model": model,
+              "output_preview": preview
+            }, f, indent=2, ensure_ascii=False)
           PY
+
+          # Vérification sortie
+          if [ ! -s "outputs/latest_output.txt" ]; then
+            echo "::error::Sortie vide : outputs/latest_output.txt"
+            [ -f reports/sigma_llm_last_report.json ] && cat reports/sigma_llm_last_report.json || true
+            exit 4
+          fi
+          echo "OK: outputs/latest_output.txt disponible."
 
       - name: Show full output (head/tail)
         if: always()
