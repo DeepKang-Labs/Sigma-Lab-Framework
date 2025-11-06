@@ -1,113 +1,79 @@
-# -*- coding: utf-8 -*-
-"""
-Sigma-LLM v3.2 — Web Interface (Gradio + Prometheus + Reflexive Mode)
-Compatibilité : Workflow GitHub + Sigma-LLM v3.2
-"""
+# app.py — Gradio + import robuste de SigmaLLM (fix no-response)
 
-import os, sys, importlib.util, json, time
-import gradio as gr
+import os, sys, importlib.util, traceback
 
-# ================================
-# 🔹 Chargement robuste du module
-# ================================
-HERE = os.path.dirname(os.path.abspath(__file__))
-CANDIDATE = os.path.join(HERE, "sigma_llm_complete.py")
-
-try:
-    from sigma_llm_complete import SigmaLLM
-except ModuleNotFoundError:
-    if os.path.exists(CANDIDATE):
-        spec = importlib.util.spec_from_file_location("sigma_llm_complete", CANDIDATE)
+# --- Import robuste de SigmaLLM ---
+def import_sigma_llm():
+    try:
+        # 1) si le fichier est à la racine du repo
+        from sigma_llm_complete import SigmaLLM
+        return SigmaLLM
+    except Exception:
+        # 2) fallback: chargement explicite par chemin
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.join(here, "sigma_llm_complete.py")
+        if not os.path.exists(candidate):
+            raise
+        spec = importlib.util.spec_from_file_location("sigma_llm_complete", candidate)
         mod = importlib.util.module_from_spec(spec)
         sys.modules["sigma_llm_complete"] = mod
         spec.loader.exec_module(mod)
-        SigmaLLM = mod.SigmaLLM
-    else:
-        raise FileNotFoundError("❌ Impossible de charger SigmaLLM : fichier sigma_llm_complete.py introuvable.")
+        return mod.SigmaLLM
 
-# ================================
-# 🔹 Chargement du modèle
-# ================================
-MODEL_NAME = os.getenv("SIGMA_LLM_MODEL", "gpt2").strip() or "gpt2"
+SigmaLLM = import_sigma_llm()
 
-print(f"[App] Démarrage Sigma-LLM sur modèle : {MODEL_NAME}")
-try:
-    agent = SigmaLLM(model_name=MODEL_NAME)
-except Exception as e:
-    print(f"[App] ⚠️ Échec du chargement du modèle {MODEL_NAME} : {e}")
-    print("[App] Tentative de fallback sur gpt2…")
-    agent = SigmaLLM(model_name="gpt2")
+# --- Choix du modèle (env ou défauts sûrs CPU) ---
+MODEL_NAME = os.getenv("SIGMA_LLM_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+FALLBACK   = "sshleifer/tiny-gpt2"
 
-# ================================
-# 🔹 Fonctions utilitaires
-# ================================
-def chat_fn(message, history):
-    """Appel unique Sigma-LLM avec enregistrement conversationnel"""
-    prompt = f"Human: {message}\nAI:"
+# --- Instanciation agent avec fallback + logs ---
+def make_agent():
     try:
-        out = agent.generate(prompt, max_new_tokens=256)
-        reply = out.split("AI:")[-1].strip()
-        return reply
+        print(f"[SigmaLLM] Loading model: {MODEL_NAME}", flush=True)
+        return SigmaLLM(model_name=MODEL_NAME)
     except Exception as e:
-        return f"[Erreur interne] {e}"
+        print(f"[SigmaLLM] Primary model failed: {e}\n→ Fallback: {FALLBACK}", flush=True)
+        return SigmaLLM(model_name=FALLBACK)
 
-def export_metrics():
-    """Affiche les dernières métriques Sigma"""
-    report_path = os.path.join("reports", "sigma_llm_last_report.json")
-    if os.path.exists(report_path):
-        try:
-            data = json.load(open(report_path, "r", encoding="utf-8"))
-            summary = json.dumps(data, indent=2, ensure_ascii=False)
-            return summary
-        except Exception as e:
-            return f"⚠️ Impossible de lire le rapport : {e}"
-    else:
-        return "Aucun rapport Sigma-LLM trouvé."
+agent = make_agent()
 
-def save_prompt(prompt):
-    """Sauvegarde rapide du dernier prompt"""
-    state_file = os.path.join("state", "last_prompt.txt")
-    os.makedirs("state", exist_ok=True)
-    with open(state_file, "w", encoding="utf-8") as f:
-        f.write(prompt)
-    return f"✅ Prompt sauvegardé ({len(prompt)} caractères)."
+# --- Gradio UI ---------------------------------------------------------------
+import gradio as gr
 
-# ================================
-# 🔹 Interface Gradio enrichie
-# ================================
-with gr.Blocks(title="Sigma-LLM Reflexive Agent (v3.2)") as demo:
-    gr.Markdown("## 🧠 Sigma-LLM Reflexive Agent — v3.2")
-    gr.Markdown(
-        "- **S(t)** : Subjectivité dynamique  \n"
-        "- **O(t)** : Objectivité pondérée  \n"
-        "- **Δcoh** : Méta-cohérence réflexive  \n"
-        "- **Homeostasis** : contrôle entropique automatique  \n"
-        "- **Prometheus** : export métriques (si activé via `SIGMA_PROM_PORT`)"
+def chat_fn(message, history):
+    """
+    Gradio ChatInterface signature: (message: str, history: list[tuple[str,str]])
+    On renvoie une string; en cas d'erreur on affiche le traceback dans le chat.
+    """
+    try:
+        # IMPORTANT: generate() attend le message utilisateur 'brut'
+        reply = agent.generate(message, max_new_tokens=160)
+        # certaines implémentations renvoient tout le transcript; on nettoie si besoin
+        if isinstance(reply, str) and "AI:" in reply:
+            reply = reply.split("AI:")[-1].strip()
+        return reply if reply else "(réponse vide)"
+    except Exception as e:
+        tb = traceback.format_exc(limit=2)
+        print(f"[chat_fn] ERROR: {e}\n{tb}", flush=True)
+        return f"⚠️ Erreur: {e}\n```\n{tb}\n```"
+
+with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
+    gr.Markdown("### Sigma-LLM — S(t) / O(t) / Δcoh — Gradio UI")
+    with gr.Row():
+        gr.Markdown(
+            f"**Model:** `{MODEL_NAME}`  \n"
+            f"**CWD:** `{os.getcwd()}`  \n"
+            f"**sigma_llm_complete.py présent ?** `{os.path.exists(os.path.join(os.getcwd(),'sigma_llm_complete.py'))}`"
+        )
+    chat = gr.ChatInterface(
+        fn=chat_fn,
+        chatbot=gr.Chatbot(height=420),
+        textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True),
+        title="Sigma-LLM",
+        description="Agent réflexif CPU-friendly (TinyLlama/GPT-2 fallback)."
     )
 
-    chat = gr.ChatInterface(fn=chat_fn, title="Dialogue réflexif Sigma-LLM")
-
-    with gr.Accordion("📊 Outils de diagnostic Sigma-Lab", open=False):
-        btn_metrics = gr.Button("Afficher dernières métriques")
-        out_metrics = gr.Textbox(label="Dernier rapport Sigma", lines=15)
-        btn_metrics.click(export_metrics, outputs=out_metrics)
-
-        prompt_input = gr.Textbox(label="Dernier prompt à sauvegarder", lines=2)
-        btn_save = gr.Button("Sauvegarder ce prompt")
-        out_save = gr.Textbox(label="État sauvegarde")
-        btn_save.click(save_prompt, inputs=prompt_input, outputs=out_save)
-
-    gr.Markdown(
-        f"**cwd :** `{os.getcwd()}`  \n"
-        f"**sigma_llm_complete.py présent ?** `{os.path.exists(CANDIDATE)}`  \n"
-        f"**Modèle actuel :** `{MODEL_NAME}`"
-    )
-
-# ================================
-# 🔹 Lancement du serveur
-# ================================
 if __name__ == "__main__":
-    PORT = int(os.getenv("PORT", "7860"))
-    HOST = os.getenv("HOST", "0.0.0.0")
-    print(f"[App] Interface Gradio disponible sur http://{HOST}:{PORT}")
-    demo.launch(server_name=HOST, server_port=PORT)
+    # pour Codespaces/localhost
+    port = int(os.getenv("PORT", "7860"))
+    demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
