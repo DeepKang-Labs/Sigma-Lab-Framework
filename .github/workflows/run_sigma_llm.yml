@@ -31,8 +31,8 @@ jobs:
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
       SIGMA_OUTPUTS_DIR: outputs
-      PYTHONUNBUFFERED: "1"   # <-- IMPORTANT: pas de buffering des sorties
-      # SIGMA_PROM_PORT: "0"  # optionnel: métriques Prometheus
+      PYTHONUNBUFFERED: "1"   # sorties non-bufferisées
+      # SIGMA_PROM_PORT: "0"  # optionnel: Prometheus
 
     steps:
       - name: Checkout
@@ -51,7 +51,6 @@ jobs:
           pip install "transformers>=4.42" "accelerate>=0.33" "tqdm" "numpy" "matplotlib" \
                       "prometheus-client" "faiss-cpu" "sentence-transformers"
 
-      # ---- Resolve inputs safely (pas de logique YAML dans env) ---------------
       - name: Resolve inputs → $GITHUB_ENV
         shell: bash
         run: |
@@ -131,51 +130,63 @@ jobs:
               }, open(metrics_path,"w"), indent=2, ensure_ascii=False)
           PY
 
-      - name: Execute Sigma-LLM (CI-safe, one-shot autodiscover)
+      # ---------- EXECUTION DIRECTE: python -u <script> --prompt --model -------
+      - name: Execute Sigma-LLM (python -u direct)
         id: exec_sigma
         env:
-          PYTHONPATH: ${{ github.workspace }}   # pour les imports "from sigma.core..."
+          PYTHONPATH: ${{ github.workspace }}
           SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
           SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
         shell: bash
         run: |
           set -euo pipefail
+
+          # Autodécouverte de fichier (ordre de préférence)
+          candidates=( "sigma_llm_complete.py" "sigmacomplettllm.py" )
+          # Ajoute les glob dynamiques (résistent si aucun match)
+          for f in sigma_llm*.py SigmaLLM*.py; do
+            [ -e "$f" ] && candidates+=("$f")
+          done
+
+          script=""
+          for f in "${candidates[@]}"; do
+            if [ -f "$f" ]; then
+              script="$f"
+              break
+            fi
+          done
+
+          if [ -z "$script" ]; then
+            echo "::error::Aucun script Sigma-LLM trouvé (sigma_llm*.py / SigmaLLM*.py)."
+            exit 2
+          fi
+
+          echo "Using Sigma-LLM script: $script"
+          mkdir -p "$SIGMA_OUTPUTS_DIR" "$SIGMA_REPORTS_DIR"
+
+          # Exécution non-bufferisée (+ flush forcé côté script)
+          python -u "$script" --prompt "$SIGMA_PROMPT" --model "$SIGMA_LLM_MODEL"
+
+          # Petit rapport CI (aperçu) pour le Summary
           python - <<'PY'
-          import os, importlib.util, json, sys, pathlib, time
-          ROOT = pathlib.Path(".")
-          patterns = ["sigma_llm_complete.py", "sigmacomplettllm.py", "sigma_llm*.py", "SigmaLLM*.py"]
-          found = []
-          for patt in patterns:
-              found += [str(p) for p in ROOT.glob(patt)]
-          if not found:
-              print("::error::Aucun fichier Sigma-LLM trouvé.")
-              sys.exit(2)
-          script = sorted(found)[0]
-          print(f"Using Sigma-LLM script: {script}")
-          spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
-          mod  = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(mod)
-
-          prompt = os.getenv("SIGMA_PROMPT", "Diagnostic quotidien : état réseau & marché.")
-          model  = os.getenv("SIGMA_LLM_MODEL", "gpt2")
-
-          if not hasattr(mod, "SigmaLLM"):
-              print("::error::Classe SigmaLLM introuvable dans le script.")
-              sys.exit(3)
-
-          agent = mod.SigmaLLM(model_name=model)
-          text  = agent.generate(prompt)
-
-          RP = os.getenv("SIGMA_REPORTS_DIR","reports")
-          pathlib.Path(RP).mkdir(parents=True, exist_ok=True)
-          ci_report = {
-              "ts": int(time.time()),
-              "prompt": prompt,
-              "model": model,
-              "output_preview": text[-1000:]
+          import os, json, time
+          RP  = os.getenv("SIGMA_REPORTS_DIR","reports")
+          OUT = os.path.join(os.getenv("SIGMA_OUTPUTS_DIR","outputs"), "latest_output.txt")
+          PREVIEW = ""
+          try:
+            PREVIEW = open(OUT, "r", encoding="utf-8").read()
+            PREVIEW = PREVIEW[-1000:]
+          except Exception:
+            PREVIEW = "(no latest_output.txt)"
+          ci = {
+            "ts": int(time.time()),
+            "prompt": os.getenv("SIGMA_PROMPT","(n/a)"),
+            "model": os.getenv("SIGMA_LLM_MODEL","(n/a)"),
+            "output_preview": PREVIEW
           }
-          with open(f"{RP}/sigma_llm_ci_report.json","w", encoding="utf-8") as f:
-              json.dump(ci_report, f, indent=2, ensure_ascii=False)
+          os.makedirs(RP, exist_ok=True)
+          with open(os.path.join(RP, "sigma_llm_ci_report.json"), "w", encoding="utf-8") as f:
+            json.dump(ci, f, indent=2, ensure_ascii=False)
           PY
 
       - name: Show full output (head/tail)
