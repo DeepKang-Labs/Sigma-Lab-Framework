@@ -249,7 +249,7 @@ jobs:
           retention-days: 14
 
       # (Optionnel) Nettoyage pour éviter un disque runner saturé
-      - name: Free disk space (optional)
+      - name: Free HF cache (optional)
         if: always()
         run: |
           sudo rm -rf ~/.cache/pip || true
