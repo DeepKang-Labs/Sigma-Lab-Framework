@@ -8,9 +8,9 @@ on:
         required: false
         default: "Diagnostic quotidien : état réseau & marché."
       model_name:
-        description: "Modèle HF (ex: gpt2, TinyLlama/TinyLlama-1.1B-Chat-v1.0, etc.)"
+        description: "Modèle HF (ex: meta-llama/Meta-Llama-3-8B-Instruct)"
         required: false
-        default: "gpt2"
+        default: "meta-llama/Meta-Llama-3-8B-Instruct"
   schedule:
     - cron: "21 4 * * *"  # chaque jour à 04:21 UTC (optionnel)
 
@@ -120,7 +120,7 @@ jobs:
         run: |
           set -e
           PROMPT="${PROMPT_IN:-Diagnostic quotidien : état réseau & marché.}"
-          MODEL="${MODEL_IN:-gpt2}"
+          MODEL="${MODEL_IN:-meta-llama/Meta-Llama-3-8B-Instruct}"
 
           python - <<'PY'
           import os, importlib.util, pathlib, json, time, sys
@@ -140,7 +140,7 @@ jobs:
               print("::error:: Classe SigmaLLM introuvable"); sys.exit(2)
 
           prompt = os.getenv("PROMPT_IN","Diagnostic quotidien : état réseau & marché.")
-          model  = os.getenv("MODEL_IN","gpt2")
+          model  = os.getenv("MODEL_IN","meta-llama/Meta-Llama-3-8B-Instruct")
           agent  = mod.SigmaLLM(model_name=model)
           _ = agent.generate(prompt)
 
