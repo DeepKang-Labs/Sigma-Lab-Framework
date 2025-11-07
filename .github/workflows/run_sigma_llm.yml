@@ -24,22 +24,17 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # Llama-3 8B est volumineux et lent en CPU
+    timeout-minutes: 90
 
     env:
-      # Dossiers projet
       SIGMA_CONFIGS_DIR: configs
       SIGMA_STATE_DIR: state
       SIGMA_REPORTS_DIR: reports
       SIGMA_OUTPUTS_DIR: outputs
-
-      # Sorties non-bufferisées
       PYTHONUNBUFFERED: "1"
-
-      # Accélération / stabilité HF
       HF_HOME: ${{ github.workspace }}/.hf_cache
       HF_HUB_DISABLE_TELEMETRY: "1"
-      HF_HUB_ENABLE_HF_TRANSFER: "1"   # nécessite le paquet hf_transfer
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
       TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
       TOKENIZERS_PARALLELISM: "false"
 
@@ -59,27 +54,16 @@ jobs:
           pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install \
             "transformers>=4.42" "accelerate>=0.33" \
-            "tqdm" "numpy" "matplotlib" \
-            "prometheus-client" "faiss-cpu" "sentence-transformers" \
+            tqdm numpy matplotlib \
+            prometheus-client faiss-cpu sentence-transformers \
             hf_transfer safetensors sentencepiece protobuf einops huggingface_hub
 
-      - name: Login to Hugging Face (for gated models)
-        env:
-          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
-        shell: bash
-        run: |
-          if [ -z "${HUGGING_FACE_HUB_TOKEN:-}" ]; then
-            echo "::warning::No HF token provided (secrets.HF_TOKEN). Gated models like Meta-Llama-3 will 401."
-            exit 0
-          fi
-          python - <<'PY'
-import os, sys, subprocess
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "huggingface_hub>=0.24"], check=True)
-from huggingface_hub import login
-tok = os.environ.get("HUGGING_FACE_HUB_TOKEN","").strip()
-login(token=tok, add_to_git_credential=True)
-print("[HF] Auth OK")
-PY
+      # ✅ Robust HF login (no YAML heredoc)
+      - name: Login to Hugging Face (if token present)
+        if: ${{ secrets.HF_TOKEN != '' }}
+        uses: huggingface/login@v1
+        with:
+          token: ${{ secrets.HF_TOKEN }}
 
       # ---- Resolve inputs → $GITHUB_ENV --------------------------------------
       - name: Resolve inputs → $GITHUB_ENV
@@ -105,8 +89,8 @@ PY
           set -euo pipefail
           mkdir -p "$SIGMA_CONFIGS_DIR" "$SIGMA_STATE_DIR" "$SIGMA_REPORTS_DIR" "$SIGMA_OUTPUTS_DIR"
           mkdir -p sigma/core
-          [ -f sigma/__init__.py ] || echo "" > sigma/__init__.py
-          [ -f sigma/core/__init__.py ] || echo "" > sigma/core/__init__.py
+          [ -f sigma/__init__.py ] || : > sigma/__init__.py
+          [ -f sigma/core/__init__.py ] || : > sigma/core/__init__.py
 
           python - <<'PY'
           import os, json, time, pathlib
@@ -170,7 +154,6 @@ PY
           echo "Python:"; python -V
           echo "Env MODEL=${SIGMA_LLM_MODEL}"
 
-          # Trouver le script Sigma
           script=$( (ls -1 sigma_llm_complete.py 2>/dev/null || true) ; \
                     (ls -1 sigmacomplettllm.py 2>/dev/null || true) ; \
                     ls -1 sigma_llm*.py 2>/dev/null | head -n 1 )
@@ -190,10 +173,10 @@ PY
           outpath = os.path.join(outdir, "latest_output.txt")
 
           # import du module
-          candidates = [p for p in os.listdir(".") if p.startswith("sigma_llm") and p.endswith(".py")]
-          if not candidates:
-              print("::error::No sigma_llm*.py found", flush=True); sys.exit(2)
-          script = sorted(candidates)[0]
+          script_candidates = [p for p in os.listdir(".") if p.startswith("sigma_llm") and p.endswith(".py")]
+          if not script_candidates:
+              print("::error::sigma_llm script introuvable"); sys.exit(2)
+          script = sorted(script_candidates)[0]
           spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
           mod  = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
@@ -236,10 +219,9 @@ PY
             }, f, indent=2, ensure_ascii=False)
           PY
 
-          # Vérification sortie
           if [ ! -s "outputs/latest_output.txt" ]; then
             echo "::error::Sortie vide : outputs/latest_output.txt"
-            [ -f reports/sigma_llm_last_report.json ] && cat reports/sigma_llm_last_report.json || true
+            [ -f reports/sigma_llm_ci_report.json ] && cat reports/sigma_llm_ci_report.json || true
             exit 4
           fi
           echo "OK: outputs/latest_output.txt disponible."
