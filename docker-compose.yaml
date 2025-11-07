@@ -55,7 +55,7 @@ services:
     container_name: sigma-llm
     environment:
       MODE: llm
-      SIGMA_LLM_MODEL: "${SIGMA_LLM_MODEL:-sshleifer/tiny-gpt2}"  # remplace par ton modèle
+      SIGMA_LLM_MODEL: "${SIGMA_LLM_MODEL:-meta-llama/Meta-Llama-3-8B-Instruct}"  # remplace par ton modèle
       SIGMA_PROM_PORT: "9108"
     volumes:
       - ./:/workspace:ro
