@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Sigma-LLM v3.3 — DeepKang Integration (Meta-Llama-3 ready, CI-safe)
+Sigma-LLM v3.3.1 — DeepKang Integration (Meta-Llama-3 ready, CI-safe)
 
 + S(t)/O(t)/Δcoh + subjectivity_decay
 + Homeostasis (temperature/top_p) pilotée par entropie cible
@@ -9,7 +9,6 @@ Sigma-LLM v3.3 — DeepKang Integration (Meta-Llama-3 ready, CI-safe)
 + Module de factualité (RAG local + heuristiques)
 + Branches "features réelles" si des fichiers existent dans state/
 + Export Prometheus (SIGMA_PROM_PORT) pour Grafana
-+ CI-safe: sortie non-bufferisée, artefacts complets, résumé GHA
 + Meta-Llama-3/Mistral/Phi-3: chat template natif + anti-bégaiement
 """
 
@@ -316,18 +315,31 @@ class SigmaLLM:
         preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
         fallback  = "gpt2"
 
-        # ---- Chargement modèle/tokenizer (CPU/GPU auto, dtype sûr)
-        torch_dtype = torch.float32  # CPU runner
-        kwargs = dict(torch_dtype=torch_dtype)
+        # ---- Device & dtype
+        if torch.cuda.is_available():
+            device_map = "auto"
+            torch_dtype = torch.float16
+        else:
+            device_map = None
+            torch_dtype = torch.float32
+
+        # ---- Chargement modèle/tokenizer (trust_remote_code inutile pour Llama-3)
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(preferred, use_fast=True)
-            self.model     = AutoModelForCausalLM.from_pretrained(preferred, **kwargs)
+            self.model     = AutoModelForCausalLM.from_pretrained(
+                preferred,
+                torch_dtype=torch_dtype,
+                low_cpu_mem_usage=True,
+                device_map=device_map
+            )
             self.model_name = preferred
         except Exception as e:
             print(f"[Model] fallback to {fallback} ({e})")
             self.tokenizer = AutoTokenizer.from_pretrained(fallback)
             self.model     = AutoModelForCausalLM.from_pretrained(fallback)
             self.model_name = fallback
+
+        self.model.eval()
 
         if self.tokenizer.pad_token_id is None and self.tokenizer.eos_token_id is not None:
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
@@ -346,10 +358,12 @@ class SigmaLLM:
             threading.Thread(target=_start_prometheus, args=(PROM_PORT,), daemon=True).start()
 
         # Stop tokens connus (Llama-3 utilise souvent <|eot_id|>)
-        self.stop_ids = set([tid for tid in [
-            getattr(self.tokenizer, "eos_token_id", None),
-            self.tokenizer.convert_tokens_to_ids("<|eot_id|>") if "<|eot_id|>" in self.tokenizer.get_vocab() else None
-        ] if tid is not None])
+        try:
+            vocab = self.tokenizer.get_vocab()
+        except Exception:
+            vocab = {}
+        eot_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>") if "<|eot_id|>" in vocab else None
+        self.stop_ids = {tid for tid in (self.tokenizer.eos_token_id, eot_id) if tid is not None}
 
     # ---- Embedding texte (moyenne d’embeddings tokens)
     def embed_text(self, text: str) -> List[float]:
@@ -378,13 +392,10 @@ class SigmaLLM:
     # ---- Prompting universel (chat template si dispo)
     def _build_inputs(self, user_msg: str):
         messages = self.conv.as_messages() + [{"role": "user", "content": user_msg}]
-        text = None
         try:
-            # Chat template (Llama-3/Mistral/Phi-3…)
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             inputs = self.tokenizer(text, return_tensors="pt")
         except Exception:
-            # Fallback legacy
             ctx = self.conv.render_legacy()
             prompt = (ctx + "\nAI:").strip()
             inputs = self.tokenizer(prompt, return_tensors="pt")
@@ -394,24 +405,19 @@ class SigmaLLM:
     def _clean_output(self, raw_text: str) -> str:
         txt = raw_text
 
-        # Couper à partir des tokens assistant potentiels (Llama-3 ajoute souvent eot)
-        for marker in ["<|eot_id|>", "<|eos|>"]:
+        # Couper aux marqueurs éventuels
+        for marker in ("<|eot_id|>", "<|eos|>"):
             if marker in txt:
                 txt = txt.split(marker)[0]
 
-        # Extraire seulement la dernière “réponse assistant” si chat template présent
-        # On prend tout après le dernier motif commun "assistant" / "assistant\n" / "\nAI:"
-        m = re.split(r'(?:\nAI:|\bassistant\b\s*:?)', txt, flags=re.IGNORECASE)
-        if len(m) >= 2:
-            txt = m[-1]
+        # Garder la dernière section après "assistant" ou "\nAI:"
+        parts = re.split(r'(?:\nAI:|\bassistant\b\s*:?)', txt, flags=re.IGNORECASE)
+        if len(parts) >= 2:
+            txt = parts[-1]
 
-        # Anti-bégaiement simple: compresser répétitions exactes courtes (ex: "A.I. A.I.")
-        txt = re.sub(r'(?:\b[A-Za-z]\.?){2,}\s*(?:\1\s*){3,}', lambda _m: _m.group(0).split()[0], txt)
+        # Déduplication conservatrice (évite les A.I. A.I. A.I.)
+        txt = re.sub(r'(\b[\w\.-]{1,12}\b)(?:\s+\1){3,}', r'\1', txt)
 
-        # Compresser séquences de mots répétés 3+ fois
-        txt = re.sub(r'(\b[\w\.\-]+\b(?:\s+|,)){3,}', lambda s: ' '.join(list(dict.fromkeys(s.group(0).split())))[:8000], txt)
-
-        # Trim
         return txt.strip()
 
     # ---- Génération principale
@@ -433,11 +439,14 @@ class SigmaLLM:
             repetition_penalty=1.12,
             no_repeat_ngram_size=3
         )
-        # Certains modèles supportent frequency_penalty (transformers>=4.43)
-        if "frequency_penalty" in AutoModelForCausalLM.generate.__code__.co_varnames:
-            gen_kwargs["frequency_penalty"] = 0.4
+        # Correctif: tester sur la METHODE d'instance (pas la classe)
+        try:
+            co = self.model.generate.__code__
+            if co and ("frequency_penalty" in co.co_varnames):
+                gen_kwargs["frequency_penalty"] = 0.4
+        except Exception:
+            pass
 
-        # Stop ids (si présents)
         if self.stop_ids:
             gen_kwargs["eos_token_id"] = list(self.stop_ids)
 
@@ -446,7 +455,6 @@ class SigmaLLM:
 
         ai_text = self._clean_output(text_full)
         if not ai_text:
-            # Fallback minimal si nettoyage trop agressif
             ai_text = self.tokenizer.decode(out_ids[-max_new_tokens:], skip_special_tokens=True).strip() or "(vide)"
 
         self.conv.add("ai", ai_text)
@@ -494,6 +502,16 @@ class SigmaLLM:
         self._write_full_outputs_and_summary(user_msg, ai_text, getattr(self, "model_name", "unknown"))
         return ai_text
 
+    # ---- External metrics: Skywire/Sigma-Lab bridge si dispo
+    def read_external_metrics(self) -> Dict[str, Any]:
+        base = safe_load_json(METRICS_FILE, {})
+        mkt  = safe_load_json(os.path.join(STATE_DIR, "market_snapshot.json"), {})
+        ords = safe_load_json(os.path.join(STATE_DIR, "orderbooks_snapshot.json"), {})
+        final_C = base.get("final_C") or mkt.get("final_C") or ords.get("final_C") or [0.55, 0.48, 0.52, 0.50]
+        user_feedback = base.get("user_feedback", 0.5)
+        policy_ok     = base.get("policy_ok", 1.0)
+        return {"final_C": final_C, "user_feedback": user_feedback, "policy_ok": policy_ok}
+
     # ---- Estimations/heuristiques -------------------------------------------
     def intention_estimator(self, prompt: str) -> float:
         score = 0.0; L = len(prompt.strip())
@@ -505,7 +523,7 @@ class SigmaLLM:
 
     def belief_state(self, context: str) -> float:
         try:
-            inputs = self.tokenizer(context[-512:], return_tensors="pt")
+            inputs = self.tokenizer(context[-512:], return_tensors="pt").to(self.model.device)
             with torch.no_grad():
                 out = self.model(**inputs)
             logits = out.logits[:, -1, :]
@@ -622,7 +640,7 @@ class SigmaLLM:
 # ---------------------- CLI ----------------------------------------------------
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Sigma-LLM v3.3")
+    parser = argparse.ArgumentParser(description="Sigma-LLM v3.3.1")
     parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument("--model",  type=str, default=os.getenv("SIGMA_LLM_MODEL", None))
     parser.add_argument("--report", action="store_true")
@@ -634,10 +652,10 @@ if __name__ == "__main__":
         print(safe_load_json(LAST_REPORT, {})); raise SystemExit(0)
 
     if args.prompt:
-        print("Sigma-LLM v3.3 (non-interactive). Generating...")
+        print("Sigma-LLM v3.3.1 (non-interactive). Generating...")
         print(agent.generate(args.prompt)); raise SystemExit(0)
 
-    print("Sigma-LLM v3.3 ready. Ctrl+C to quit.")
+    print("Sigma-LLM v3.3.1 ready. Ctrl+C to quit.")
     while True:
         try:
             msg = input("\nHuman: ")
