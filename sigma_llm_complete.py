@@ -497,7 +497,11 @@ class SigmaLLM:
         dcoh = self.coh.delta_coh(pred_dist, obs_dist)
         S    = self.subj.step(dcoh)
         O    = self._compute_objectivity(dcoh, ai_text, external)
-        meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"]))
+
+        # ✅ meta_gain corrigé et robuste
+        mu    = float(self.params.get("mu", 0.205))
+        gamma = float(self.params.get("gamma", 0.006))
+        meta_gain = mu * (1.0 / (1.0 + gamma))
 
         metrics = SigmaMetrics(
             t=now_ts(), delta_coh=dcoh, S=S, O=O,
