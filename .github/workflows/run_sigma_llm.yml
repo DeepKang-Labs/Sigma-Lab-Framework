@@ -54,18 +54,23 @@ jobs:
           pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install \
             "transformers>=4.42" "accelerate>=0.33" \
-            tqdm numpy matplotlib \
-            prometheus-client faiss-cpu sentence-transformers \
+            "tqdm" "numpy" "matplotlib" \
+            "prometheus-client" "faiss-cpu" "sentence-transformers" \
             hf_transfer safetensors sentencepiece protobuf einops huggingface_hub
 
-      # ✅ Robust HF login (no YAML heredoc)
-      - name: Login to Hugging Face (if token present)
-        if: ${{ secrets.HF_TOKEN != '' }}
-        uses: huggingface/login@v1
-        with:
-          token: ${{ secrets.HF_TOKEN }}
+      - name: Login to Hugging Face (optional, gated models)
+        env:
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
+        shell: bash
+        run: |
+          if [ -n "${HUGGING_FACE_HUB_TOKEN:-}" ]; then
+            pip install -q "huggingface_hub>=0.24"
+            huggingface-cli login --token "$HUGGING_FACE_HUB_TOKEN" --add-to-git-credential
+            echo "[HF] Auth OK"
+          else
+            echo "[HF] No token provided (secrets.HF_TOKEN). Skipping HF login; gated repos will 401."
+          fi
 
-      # ---- Resolve inputs → $GITHUB_ENV --------------------------------------
       - name: Resolve inputs → $GITHUB_ENV
         shell: bash
         run: |
@@ -89,8 +94,8 @@ jobs:
           set -euo pipefail
           mkdir -p "$SIGMA_CONFIGS_DIR" "$SIGMA_STATE_DIR" "$SIGMA_REPORTS_DIR" "$SIGMA_OUTPUTS_DIR"
           mkdir -p sigma/core
-          [ -f sigma/__init__.py ] || : > sigma/__init__.py
-          [ -f sigma/core/__init__.py ] || : > sigma/core/__init__.py
+          [ -f sigma/__init__.py ] || echo "" > sigma/__init__.py
+          [ -f sigma/core/__init__.py ] || echo "" > sigma/core/__init__.py
 
           python - <<'PY'
           import os, json, time, pathlib
@@ -119,10 +124,7 @@ jobs:
                     "temp":  { "min": 0.60, "max": 1.20, "target_entropy": 0.55, "k": 0.15 },
                     "top_p": { "min": 0.70, "max": 0.98, "target_entropy": 0.55, "k": 0.20 }
                   },
-                  "semantic_index": {
-                    "max_items": 2000,
-                    "min_similarity_to_store": 0.15
-                  },
+                  "semantic_index": { "max_items": 2000, "min_similarity_to_store": 0.15 },
                   "conversation_memory": { "max_turns": 100 }
               }, open(params_path,"w"), indent=2, ensure_ascii=False)
 
@@ -138,7 +140,6 @@ jobs:
               }, open(metrics_path,"w"), indent=2, ensure_ascii=False)
           PY
 
-      # ---------- EXECUTION (Llama-3 avec fallback TinyLlama) ------------------
       - name: Execute Sigma-LLM (Llama-3 with safe fallback)
         id: exec_sigma
         env:
@@ -146,8 +147,6 @@ jobs:
           SIGMA_PROMPT: ${{ env.SIGMA_PROMPT }}
           SIGMA_LLM_MODEL: ${{ env.SIGMA_LLM_MODEL }}
           TRANSFORMERS_VERBOSITY: "info"
-          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -172,11 +171,9 @@ jobs:
           os.makedirs(outdir, exist_ok=True)
           outpath = os.path.join(outdir, "latest_output.txt")
 
-          # import du module
-          script_candidates = [p for p in os.listdir(".") if p.startswith("sigma_llm") and p.endswith(".py")]
-          if not script_candidates:
-              print("::error::sigma_llm script introuvable"); sys.exit(2)
-          script = sorted(script_candidates)[0]
+          candidates = [p for p in os.listdir(".") if p.startswith("sigma_llm") and p.endswith(".py")]
+          candidates.sort()
+          script = candidates[0]
           spec = importlib.util.spec_from_file_location("sigma_llm_mod", script)
           mod  = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
@@ -202,7 +199,6 @@ jobs:
               print(f"[Error] fallback failed: {e2}\n{traceback.format_exc()}", flush=True)
               sys.exit(3)
 
-          # CI report (aperçu)
           rp = os.getenv("SIGMA_REPORTS_DIR","reports")
           os.makedirs(rp, exist_ok=True)
           preview = "(empty)"
@@ -221,7 +217,7 @@ jobs:
 
           if [ ! -s "outputs/latest_output.txt" ]; then
             echo "::error::Sortie vide : outputs/latest_output.txt"
-            [ -f reports/sigma_llm_ci_report.json ] && cat reports/sigma_llm_ci_report.json || true
+            [ -f reports/sigma_llm_last_report.json ] && cat reports/sigma_llm_last_report.json || true
             exit 4
           fi
           echo "OK: outputs/latest_output.txt disponible."
