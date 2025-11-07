@@ -336,6 +336,7 @@ class SigmaLLM:
         last_err = None
         hf_token = (
             os.getenv("HUGGING_FACE_HUB_TOKEN")
+            or os.getenv("HUGGINGFACE_TOKEN")
             or os.getenv("HF_TOKEN")
             or os.getenv("HF_API_TOKEN")
         )
@@ -354,7 +355,7 @@ class SigmaLLM:
                     if not hf_token:
                         raise RuntimeError(
                             f"Model '{candidate}' requires a Hugging Face token. "
-                            "Set HUGGING_FACE_HUB_TOKEN in your environment."
+                            "Set HUGGING_FACE_HUB_TOKEN (or HUGGINGFACE_TOKEN/HF_TOKEN/HF_API_TOKEN)."
                         )
                     tok_kwargs["token"] = hf_token
                     mdl_kwargs["token"] = hf_token
@@ -435,7 +436,7 @@ class SigmaLLM:
     def _build_inputs(self, user_msg: str):
         messages = self.conv.as_messages() + [{"role": "user", "content": user_msg}]
         try:
-            # Beaucoup de modèles (Llama-3, Mistral, Phi-3) exposent un chat template
+            # Llama-3, Mistral, Phi-3 exposent un chat template
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
         except Exception:
@@ -496,7 +497,7 @@ class SigmaLLM:
         except Exception:
             pass
 
-        # ✅ Filtrer les EOS ids invalides pour éviter "index out of range in self"
+        # ✅ Filtrer les EOS ids invalides (éviter "index out of range in self")
         try:
             vocab_size = int(getattr(self.model.config, "vocab_size", 0))
             valid_eos = []
