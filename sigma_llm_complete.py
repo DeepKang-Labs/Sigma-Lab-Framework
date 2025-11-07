@@ -313,7 +313,11 @@ class SigmaLLM:
                                    min_sim=si.get("min_similarity_to_store", 0.15))
 
         preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
-        fallback  = "gpt2"
+        fallback_chain = [
+            "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            "microsoft/Phi-3-mini-4k-instruct",
+            "gpt2",
+        ]
 
         # ---- Device & dtype
         if torch.cuda.is_available():
@@ -323,21 +327,52 @@ class SigmaLLM:
             device_map = None
             torch_dtype = torch.float32
 
-        # ---- Chargement modèle/tokenizer
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(preferred, use_fast=True)
-            self.model     = AutoModelForCausalLM.from_pretrained(
-                preferred,
-                torch_dtype=torch_dtype,
-                low_cpu_mem_usage=True,
-                device_map=device_map
-            )
-            self.model_name = preferred
-        except Exception as e:
-            print(f"[Model] fallback to {fallback} ({e})")
-            self.tokenizer = AutoTokenizer.from_pretrained(fallback)
-            self.model     = AutoModelForCausalLM.from_pretrained(fallback)
-            self.model_name = fallback
+        # ---- Chargement modèle/tokenizer (avec token HF si nécessaire)
+        self.tokenizer = None
+        self.model     = None
+        self.model_name = None
+
+        tried = [preferred] + [m for m in fallback_chain if m != preferred]
+        last_err = None
+        hf_token = (
+            os.getenv("HUGGING_FACE_HUB_TOKEN")
+            or os.getenv("HF_TOKEN")
+            or os.getenv("HF_API_TOKEN")
+        )
+
+        for candidate in tried:
+            try:
+                need_token = ("meta-llama" in candidate.lower())  # modèles gated
+                tok_kwargs = dict(use_fast=True, trust_remote_code=False)
+                mdl_kwargs = dict(
+                    torch_dtype=torch_dtype,
+                    low_cpu_mem_usage=True,
+                    device_map=device_map,
+                    trust_remote_code=False,
+                )
+                if need_token:
+                    if not hf_token:
+                        raise RuntimeError(
+                            f"Model '{candidate}' requires a Hugging Face token. "
+                            "Set HUGGING_FACE_HUB_TOKEN in your environment."
+                        )
+                    tok_kwargs["token"] = hf_token
+                    mdl_kwargs["token"] = hf_token
+
+                print(f"[Model] Loading {candidate} ...", flush=True)
+                self.tokenizer = AutoTokenizer.from_pretrained(candidate, **tok_kwargs)
+                self.model     = AutoModelForCausalLM.from_pretrained(candidate, **mdl_kwargs)
+                self.model_name = candidate
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[Model] Failed {candidate}: {e}", flush=True)
+                self.tokenizer = None
+                self.model = None
+                self.model_name = None
+
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError(f"Impossible de charger un modèle. Dernière erreur: {last_err}")
 
         self.model.eval()
 
@@ -371,13 +406,20 @@ class SigmaLLM:
         emb = self.model.get_input_embeddings()(ids.to(self.model.device)).detach().cpu().mean(dim=0).tolist()
         return emb
 
-    # ---- Entropie approx
+    # ---- Entropie approx (sécurisée)
     @torch.no_grad()
     def _entropy_next(self, inputs) -> float:
-        logits = self.model(**inputs).logits[:, -1, :]
-        probs  = torch.softmax(logits, dim=-1)
-        ent    = -(probs * torch.log(probs + 1e-12)).sum(dim=-1).item()
-        return float(ent)
+        try:
+            if "input_ids" not in inputs or inputs["input_ids"].numel() == 0:
+                print("[entropy] ⚠️ Empty input_ids tensor, using fallback entropy=0.5")
+                return 0.5
+            logits = self.model(**inputs).logits[:, -1, :]
+            probs  = torch.softmax(logits, dim=-1)
+            ent    = -(probs * torch.log(probs + 1e-12)).sum(dim=-1).item()
+            return float(ent)
+        except Exception as e:
+            print(f"[entropy] fallback due to {e}")
+            return 0.5
 
     # ---- Homeostasie (contrôle P → entropie cible)
     def _adjust_homeostasis(self, entropy: float):
@@ -393,36 +435,38 @@ class SigmaLLM:
     def _build_inputs(self, user_msg: str):
         messages = self.conv.as_messages() + [{"role": "user", "content": user_msg}]
         try:
+            # Beaucoup de modèles (Llama-3, Mistral, Phi-3) exposent un chat template
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            inputs = self.tokenizer(text, return_tensors="pt")
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
         except Exception:
             ctx = self.conv.render_legacy()
             prompt = (ctx + "\nAI:").strip()
-            inputs = self.tokenizer(prompt, return_tensors="pt")
+            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True)
 
-        # 🔐 Hardening: assurer au moins un token pour éviter les erreurs internes
+        # 🔐 Hardening: assurer au moins un token
         if "input_ids" not in inputs or inputs["input_ids"].shape[-1] == 0:
             inputs = self.tokenizer(" ", return_tensors="pt")
+
+        # clamp si longueur > max_position_embeddings
+        try:
+            max_len = int(getattr(self.model.config, "max_position_embeddings", 4096))
+            if inputs["input_ids"].shape[-1] > max_len:
+                inputs = {k: v[:, -max_len:] for k, v in inputs.items()}
+        except Exception:
+            pass
 
         return inputs.to(self.model.device)
 
     # ---- Nettoyage post-génération (anti-bégaiement, coupe à l'assistant)
     def _clean_output(self, raw_text: str) -> str:
         txt = raw_text
-
-        # Couper aux marqueurs éventuels
         for marker in ("<|eot_id|>", "<|eos|>"):
             if marker in txt:
                 txt = txt.split(marker)[0]
-
-        # Garder la dernière section après "assistant" ou "\nAI:"
         parts = re.split(r'(?:\nAI:|\bassistant\b\s*:?)', txt, flags=re.IGNORECASE)
         if len(parts) >= 2:
             txt = parts[-1]
-
-        # Déduplication conservatrice (évite les A.I. A.I. A.I.)
         txt = re.sub(r'(\b[\w\.-]{1,12}\b)(?:\s+\1){3,}', r'\1', txt)
-
         return txt.strip()
 
     # ---- Génération principale
@@ -498,7 +542,6 @@ class SigmaLLM:
         S    = self.subj.step(dcoh)
         O    = self._compute_objectivity(dcoh, ai_text, external)
 
-        # ✅ meta_gain corrigé et robuste
         mu    = float(self.params.get("mu", 0.205))
         gamma = float(self.params.get("gamma", 0.006))
         meta_gain = mu * (1.0 / (1.0 + gamma))
