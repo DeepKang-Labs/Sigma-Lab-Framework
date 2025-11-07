@@ -1,6 +1,7 @@
 # app.py — Gradio UI pour Sigma-LLM (Llama-3 ready, Codespaces friendly)
 
-import os, sys, importlib.util, traceback, json, shutil, pathlib
+import os, sys, importlib.util, traceback, json, pathlib
+
 import gradio as gr
 
 # ───────────────────────────────────────────────────────────────
@@ -41,6 +42,8 @@ OUT = os.getenv("SIGMA_OUTPUTS_DIR", "outputs")
 for d in (CFG, ST, RP, OUT):
     os.makedirs(d, exist_ok=True)
 
+LATEST_OUT = os.path.join(OUT, "latest_output.txt")
+
 # ───────────────────────────────────────────────────────────────
 # Fabrique/Reload d’agent avec fallback
 # ───────────────────────────────────────────────────────────────
@@ -61,7 +64,6 @@ def make_agent(model_name: str):
         except Exception as e:
             last_err = e
             print(f"[SigmaLLM] Failed loading {m}: {e}", flush=True)
-    # Si tout a échoué, on propage l’erreur la plus récente
     raise RuntimeError(f"Impossible de charger un modèle. Dernière erreur: {last_err}")
 
 def get_agent():
@@ -74,8 +76,7 @@ def get_agent():
 # Utilitaires mémoire
 # ───────────────────────────────────────────────────────────────
 def reset_memory():
-    """Efface la mémoire conversationnelle & fichiers rapides."""
-    # Efface les fichiers de conversation / épisodes (mais garde la config)
+    """Efface la mémoire conversationnelle & fichiers rapides, puis recrée l'agent."""
     for p in [
         os.path.join(ST, "conversation.json"),
         os.path.join(ST, "episodes.jsonl"),
@@ -86,21 +87,23 @@ def reset_memory():
                 os.remove(p)
         except Exception:
             pass
-    # Vide le dernier output pour ne pas confondre
     try:
-        latest = os.path.join(OUT, "latest_output.txt")
-        if os.path.exists(latest):
-            os.remove(latest)
+        if os.path.exists(LATEST_OUT):
+            os.remove(LATEST_OUT)
     except Exception:
         pass
-    # Réinstancie l’agent pour repartir propre
     make_agent(_active_model or PREFERRED)
 
 # ───────────────────────────────────────────────────────────────
 # Fonction de chat (Branchée sur SigmaLLM.generate)
 # ───────────────────────────────────────────────────────────────
 def chat_fn(message, history, temperature, top_p):
-    """Gradio ChatInterface: reçoit message/historique + sliders."""
+    """
+    Gradio ChatInterface:
+      - message: str
+      - history: list[(user, assistant)]
+      - temperature/top_p: sliders (additional_inputs)
+    """
     agent = get_agent()
 
     # pilote direct des curseurs de l’agent
@@ -112,12 +115,17 @@ def chat_fn(message, history, temperature, top_p):
 
     try:
         reply = agent.generate(message, max_new_tokens=200)
-        # Sanity: si un transcript complet arrive, on ne renvoie que la dernière partie
         if isinstance(reply, str) and "AI:" in reply:
             reply = reply.split("AI:")[-1].strip()
+        # garde: sauvegarder aussi pour debug rapide
+        try:
+            with open(LATEST_OUT, "w", encoding="utf-8") as f:
+                f.write(reply or "")
+        except Exception:
+            pass
         return reply or "(réponse vide)"
     except Exception as e:
-        tb = traceback.format_exc(limit=3)
+        tb = traceback.format_exc(limit=4)
         print(f"[chat_fn] ERROR: {e}\n{tb}", flush=True)
         return f"⚠️ Erreur: {e}\n```\n{tb}\n```"
 
@@ -174,18 +182,21 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
         btn_reload = gr.Button("🔄 Recharger modèle")
         btn_reset  = gr.Button("🧹 Reset mémoire")
 
+    # zone d’état
+    status_msg = gr.Markdown()
     status = gr.Markdown(value=info_text())
 
     def _reload(m):
         msg = on_change_model(m)
         return msg, info_text()
 
-    btn_reload.click(_reload, inputs=model_dd, outputs=[gr.Markdown(), status])
-    btn_reset.click(lambda: (on_reset_memory(), info_text()), outputs=[gr.Markdown(), status])
+    btn_reload.click(_reload, inputs=model_dd, outputs=[status_msg, status])
+    btn_reset.click(lambda: (on_reset_memory(), info_text()), outputs=[status_msg, status])
 
     gr.Markdown("### 💬 Chat")
     chat = gr.ChatInterface(
-        fn=lambda msg, hist: chat_fn(msg, hist, temp.value, topp.value),
+        fn=chat_fn,
+        additional_inputs=[temp, topp],  # ✅ sliders réellement reliés à chat_fn
         chatbot=gr.Chatbot(height=460, avatar_images=(None, None)),
         textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True, submit_on_enter=True),
         title="Sigma-LLM",
@@ -205,5 +216,4 @@ if __name__ == "__main__":
         print(f"[boot] warning: preferred model not available ({e}) — UI démarre avec fallback à la première requête.")
 
     port = int(os.getenv("PORT", "7860"))
-    # Codespaces: Gradio sait ouvrir l’URL publique automatiquement
     demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
