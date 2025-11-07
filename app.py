@@ -1,7 +1,6 @@
 # app.py — Gradio UI pour Sigma-LLM (Llama-3 ready, Codespaces friendly)
 
 import os, sys, importlib.util, traceback, json, pathlib
-
 import gradio as gr
 
 # ───────────────────────────────────────────────────────────────
@@ -15,11 +14,17 @@ def import_sigma_llm():
         here = os.path.dirname(os.path.abspath(__file__))
         candidate = os.path.join(here, "sigma_llm_complete.py")
         if not os.path.exists(candidate):
-            raise
+            raise ImportError("sigma_llm_complete.py introuvable à la racine du repo")
+
         spec = importlib.util.spec_from_file_location("sigma_llm_complete", candidate)
+        if spec is None or spec.loader is None:
+            raise ImportError("Impossible de créer un ModuleSpec pour sigma_llm_complete.py")
+
         mod = importlib.util.module_from_spec(spec)
         sys.modules["sigma_llm_complete"] = mod
         spec.loader.exec_module(mod)
+        if not hasattr(mod, "SigmaLLM"):
+            raise ImportError("SigmaLLM non trouvé dans sigma_llm_complete.py")
         return mod.SigmaLLM
 
 SigmaLLM = import_sigma_llm()
@@ -95,7 +100,7 @@ def reset_memory():
     make_agent(_active_model or PREFERRED)
 
 # ───────────────────────────────────────────────────────────────
-# Fonction de chat (Branchée sur SigmaLLM.generate)
+# Fonction de chat (branchée sur SigmaLLM.generate)
 # ───────────────────────────────────────────────────────────────
 def chat_fn(message, history, temperature, top_p):
     """
@@ -216,4 +221,5 @@ if __name__ == "__main__":
         print(f"[boot] warning: preferred model not available ({e}) — UI démarre avec fallback à la première requête.")
 
     port = int(os.getenv("PORT", "7860"))
+    print(f"[SigmaLLM] Gradio démarre sur 0.0.0.0:{port}", flush=True)
     demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
