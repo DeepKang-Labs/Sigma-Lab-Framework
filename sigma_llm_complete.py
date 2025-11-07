@@ -316,7 +316,7 @@ class SigmaLLM:
         fallback_chain = [
             "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
             "microsoft/Phi-3-mini-4k-instruct",
-            "gpt2",
+            "meta-llama/Meta-Llama-3-8B-Instruct",
         ]
 
         # ---- Device & dtype
