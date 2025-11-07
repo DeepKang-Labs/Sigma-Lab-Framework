@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Sigma-LLM v3.3.1 — DeepKang Integration (Meta-Llama-3 ready, CI-safe)
+Sigma-LLM v3.3.2 — DeepKang Integration (Meta-Llama-3 ready, CI-safe)
 
 + S(t)/O(t)/Δcoh + subjectivity_decay
 + Homeostasis (temperature/top_p) pilotée par entropie cible
@@ -323,7 +323,7 @@ class SigmaLLM:
             device_map = None
             torch_dtype = torch.float32
 
-        # ---- Chargement modèle/tokenizer (trust_remote_code inutile pour Llama-3)
+        # ---- Chargement modèle/tokenizer
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(preferred, use_fast=True)
             self.model     = AutoModelForCausalLM.from_pretrained(
@@ -399,6 +399,11 @@ class SigmaLLM:
             ctx = self.conv.render_legacy()
             prompt = (ctx + "\nAI:").strip()
             inputs = self.tokenizer(prompt, return_tensors="pt")
+
+        # 🔐 Hardening: assurer au moins un token pour éviter les erreurs internes
+        if "input_ids" not in inputs or inputs["input_ids"].shape[-1] == 0:
+            inputs = self.tokenizer(" ", return_tensors="pt")
+
         return inputs.to(self.model.device)
 
     # ---- Nettoyage post-génération (anti-bégaiement, coupe à l'assistant)
@@ -447,9 +452,19 @@ class SigmaLLM:
         except Exception:
             pass
 
-        if self.stop_ids:
-            gen_kwargs["eos_token_id"] = list(self.stop_ids)
+        # ✅ Filtrer les EOS ids invalides pour éviter "index out of range in self"
+        try:
+            vocab_size = int(getattr(self.model.config, "vocab_size", 0))
+            valid_eos = []
+            for tid in getattr(self, "stop_ids", set()):
+                if isinstance(tid, int) and 0 <= tid < vocab_size:
+                    valid_eos.append(tid)
+            if valid_eos:
+                gen_kwargs["eos_token_id"] = valid_eos
+        except Exception:
+            pass
 
+        # Génération
         out_ids = self.model.generate(**inputs, **gen_kwargs)[0]
         text_full = self.tokenizer.decode(out_ids, skip_special_tokens=False)
 
@@ -482,7 +497,7 @@ class SigmaLLM:
         dcoh = self.coh.delta_coh(pred_dist, obs_dist)
         S    = self.subj.step(dcoh)
         O    = self._compute_objectivity(dcoh, ai_text, external)
-        meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"])))
+        meta_gain = float(self.params["mu"]) * (1.0 / (1.0 + float(self.params["gamma"]))
 
         metrics = SigmaMetrics(
             t=now_ts(), delta_coh=dcoh, S=S, O=O,
@@ -640,7 +655,7 @@ class SigmaLLM:
 # ---------------------- CLI ----------------------------------------------------
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Sigma-LLM v3.3.1")
+    parser = argparse.ArgumentParser(description="Sigma-LLM v3.3.2")
     parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument("--model",  type=str, default=os.getenv("SIGMA_LLM_MODEL", None))
     parser.add_argument("--report", action="store_true")
@@ -652,10 +667,10 @@ if __name__ == "__main__":
         print(safe_load_json(LAST_REPORT, {})); raise SystemExit(0)
 
     if args.prompt:
-        print("Sigma-LLM v3.3.1 (non-interactive). Generating...")
+        print("Sigma-LLM v3.3.2 (non-interactive). Generating...")
         print(agent.generate(args.prompt)); raise SystemExit(0)
 
-    print("Sigma-LLM v3.3.1 ready. Ctrl+C to quit.")
+    print("Sigma-LLM v3.3.2 ready. Ctrl+C to quit.")
     while True:
         try:
             msg = input("\nHuman: ")
