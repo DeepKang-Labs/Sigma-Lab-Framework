@@ -198,7 +198,7 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
         fn=chat_fn,
         additional_inputs=[temp, topp],  # ✅ sliders réellement reliés à chat_fn
         chatbot=gr.Chatbot(height=460, avatar_images=(None, None)),
-        textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True, submit_on_enter=True),
+        textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True),
         title="Sigma-LLM",
         description="Agent réflexif (Llama-3 ready). Les sorties sont archivées dans outputs/ et reports/.",
         theme="soft",
