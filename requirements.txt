@@ -16,17 +16,30 @@ matplotlib>=3.8
 gradio>=4.31
 prometheus-client>=0.19
 
-# --- LLM stack (CPU) ---
-# Astuce: si l'installation de torch échoue, installe-le à part avec:
-#   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.3.1
+# --- LLM stack ---
+# Torch : garde cette pin si ton Codespace est CPU-only.
+# Pour GPU/CUDA, installe torch séparément avec l'index PyTorch adapté.
+#   CPU (exemple)  : pip install --index-url https://download.pytorch.org/whl/cpu torch==2.3.1
+#   CUDA 11.8 (ex) : pip install --index-url https://download.pytorch.org/whl/cu118 torch==2.3.1+cu118
 torch==2.3.1
-transformers==4.43.3
-accelerate==0.33.0
-sentence-transformers==3.0.1
-faiss-cpu==1.8.0
-huggingface-hub>=0.23
-safetensors>=0.4.2
 
-# --- (Optionnel) API FastAPI si tu exposes un endpoint HTTP ---
+# Transformers/Accelerate récents pour Meta-Llama 3 + chat template stable
+transformers>=4.44.0
+accelerate>=0.33.0
+
+# Quantization 4-bits (optionnelle, nécessite CUDA à l'exécution).
+# L'installation peut réussir en CPU-only, mais le chargement 4-bit ne sera activé
+# que si CUDA est présent. Le code gère automatiquement l’absence de bnb.
+bitsandbytes>=0.43.1
+
+# Embeddings / RAG léger
+sentence-transformers>=3.0.1
+faiss-cpu>=1.8.0
+
+# HF Hub + sécurité
+huggingface-hub>=0.24.0
+safetensors>=0.4.3
+
+# --- (Optionnel) API HTTP ---
 fastapi>=0.115.2
 uvicorn[standard]>=0.30.6
