@@ -140,7 +140,7 @@ jobs:
               }, open(metrics_path,"w"), indent=2, ensure_ascii=False)
           PY
 
-      - name: Execute Sigma-LLM (Llama-3 with safe fallback)
+      - name: Execute Sigma-LLM (meta-llama/Meta-Llama-3-8B-Instruct)
         id: exec_sigma
         env:
           PYTHONPATH: ${{ github.workspace }}
