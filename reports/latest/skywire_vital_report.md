@@ -1,6 +1,6 @@
 # Skywire Vital Report
 
-**Last measurement: 2025-11-30**
+**Last measurement: 2025-12-01**
 
 ## Daily Summary
 - **Success ratio** : – (· –)
