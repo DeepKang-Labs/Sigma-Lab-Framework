@@ -1,12 +1,12 @@
 {
-  "date_utc": "2025-12-04",
+  "date_utc": "2025-12-05",
   "engine": "sigma-v1",
   "inputs": {
     "source": "unknown",
     "payloads": 9
   },
   "features": {
-    "success_ratio_pct": 66.67,
+    "success_ratio_pct": 55.56,
     "latency_avg_ms": null,
     "supply": {
       "height": null,
@@ -15,5 +15,5 @@
       "coin_hours": null
     }
   },
-  "generated_utc": "2025-12-04T04:00:41.761275Z"
+  "generated_utc": "2025-12-05T04:00:20.708845Z"
 }
