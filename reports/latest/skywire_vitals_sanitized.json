@@ -1,5 +1,5 @@
 {
-  "date_utc": "2025-12-08",
+  "date_utc": "2025-12-09",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -29,7 +29,7 @@
         "height": null,
         "current_supply": "23628729.000000",
         "total_supply": "25000000.000000",
-        "coin_hours": "1113796775800",
+        "coin_hours": "1114154252253",
         "note": null
       }
     },
@@ -76,27 +76,95 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 1814,
-        "vpn": 1077,
-        "transports": 2453,
-        "dmsg_entries": 3594,
+        "proxies": 1816,
+        "vpn": 1078,
+        "transports": 4045,
+        "dmsg_entries": 3595,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
             {
-              "address": "03fa0098741678b4f866dc30deecb4375f888af544c2b9753baa8902508e2fa173:3",
+              "address": "031fc6a42965440b0bb761120c53001d03ead6c862249b1851368097fd19b3a9f1:3",
               "type": "skysocks",
               "version": "v1.3.31",
               "geo": {
-                "lat": 49.28,
-                "lon": -123.13,
-                "country": "CA",
-                "region": "BC"
+                "lat": 51.42,
+                "lon": 6.87,
+                "country": "DE",
+                "region": "NW"
               }
             },
             {
-              "address": "0257e1fa7abb7c287953ae525dd3ee75119fbedce14652eb14dcb8335a6b13f403:3",
+              "address": "024e3b90d1f881cd6a738f3196cb63a8b820281ad86db7b58f35491f7b7982db51:3",
               "type": "skysocks",
+              "version": "v1.3.31",
+              "geo": {
+                "lat": 50.11,
+                "lon": 14.41,
+                "country": "CZ",
+                "region": "10"
+              }
+            },
+            {
+              "address": "03ad5de56deef988f50386918d8a764501d8e26d3c0bae05f76aae28a672c3db7d:3",
+              "type": "skysocks",
+              "version": "v1.3.31",
+              "geo": {
+                "lat": -6.18,
+                "lon": 106.83,
+                "country": "ID",
+                "region": null
+              }
+            },
+            {
+              "address": "03f3a0928d15830055b7fc4b8eb852c856bc597ec2e15583db34de5799dcd01252:3",
+              "type": "skysocks",
+              "version": "v1.3.31",
+              "geo": {
+                "lat": -6.22,
+                "lon": 106.84,
+                "country": "ID",
+                "region": "JK"
+              }
+            },
+            {
+              "address": "036239e4c862c2d06737e6743e02d30c0ea4283092712079ca340b8142b6c5d437:3",
+              "type": "skysocks",
+              "version": "v1.3.31",
+              "geo": {
+                "lat": 45.13,
+                "lon": 10.38,
+                "country": "IT",
+                "region": "25"
+              }
+            }
+          ],
+          "vpn": [
+            {
+              "address": "02d26e6a7ad7ab93634af56a8fb909dbc9de42fc1d93ebb89d4f65e6b8fcc77604:44",
+              "type": "vpn",
+              "version": "v1.3.19",
+              "geo": {
+                "lat": -8.58,
+                "lon": 116.12,
+                "country": "ID",
+                "region": "NB"
+              }
+            },
+            {
+              "address": "0287ac4ef3d2ede7b124014ac5e2768c5b009c529c5d86861c371fb8ab4d0b0251:44",
+              "type": "vpn",
+              "version": "v1.3.31",
+              "geo": {
+                "lat": 1.14,
+                "lon": 104.01,
+                "country": "ID",
+                "region": "RI"
+              }
+            },
+            {
+              "address": "0315597da585c5577bba8bd7f2c31d79ebecb255067d5bc32f6596b7fa0b710b9e:44",
+              "type": "vpn",
               "version": "v1.3.31",
               "geo": {
                 "lat": -7.15,
@@ -106,53 +174,18 @@
               }
             },
             {
-              "address": "0277d816d942b2979a59280c7437e6e40b8ab3204291d21a1eb493ba751c70c69a:3",
-              "type": "skysocks",
-              "version": "0.5.1",
+              "address": "035445fc40b12fb4d74c3c884a49c81068553b2a500a56a4b24bec87cf12e557df:44",
+              "type": "vpn",
+              "version": "v1.3.23",
               "geo": {
-                "lat": -6.18,
-                "lon": 106.83,
-                "country": "ID",
-                "region": null
-              }
-            },
-            {
-              "address": "023e2498505b22a89950eb9600121d8fc0998c2a7e0e1ea393f89c91e1d0c5e4c2:3",
-              "type": "skysocks",
-              "version": "v1.2.1",
-              "geo": {
-                "lat": -6.18,
-                "lon": 106.82,
+                "lat": -6.21,
+                "lon": 106.84,
                 "country": "ID",
                 "region": "JK"
               }
             },
             {
-              "address": "0361f8047000b3f9da5fb5eac7f1250cf1484851f0f68dbb95c5821e937a851d26:3",
-              "type": "skysocks",
-              "version": "v1.3.31",
-              "geo": {
-                "lat": 1.29,
-                "lon": 103.85,
-                "country": "SG",
-                "region": null
-              }
-            }
-          ],
-          "vpn": [
-            {
-              "address": "02a74c74ca599732f1ab73d930efaa51d1d03cbacb12a2c3394f356a863dec0f86:44",
-              "type": "vpn",
-              "version": "v1.3.28",
-              "geo": {
-                "lat": 3.14,
-                "lon": 101.69,
-                "country": "MY",
-                "region": "14"
-              }
-            },
-            {
-              "address": "024b0e6db1a58b8dc19f1d2879044da9cc311c25d208269b93bb927695e2c69af5:44",
+              "address": "039f5f5520cd254c4f205b600dde851d41940b46b24ed73414d250a131d8cae5dd:44",
               "type": "vpn",
               "version": "v1.3.28",
               "geo": {
@@ -160,39 +193,6 @@
                 "lon": 106.83,
                 "country": "ID",
                 "region": null
-              }
-            },
-            {
-              "address": "03f0e34ffe54dcbdb084620098838c51cba26baa650171a251fda24c2a89261504:44",
-              "type": "vpn",
-              "version": "v1.3.21",
-              "geo": {
-                "lat": -6.24,
-                "lon": 106.82,
-                "country": "ID",
-                "region": "JK"
-              }
-            },
-            {
-              "address": "0305455f940763c6d5240b4576689f2ad345e197aa42f43f44a01c947fc4ca6b60:44",
-              "type": "vpn",
-              "version": "v1.3.31",
-              "geo": {
-                "lat": 52.06,
-                "lon": 4.36,
-                "country": "NL",
-                "region": "ZH"
-              }
-            },
-            {
-              "address": "02a3630a7d0139598a5d3e1a22d48c80056675b1d02e979802af961b2cee435b64:44",
-              "type": "vpn",
-              "version": "v1.3.28",
-              "geo": {
-                "lat": -7.25,
-                "lon": 112.74,
-                "country": "ID",
-                "region": "JI"
               }
             }
           ],
