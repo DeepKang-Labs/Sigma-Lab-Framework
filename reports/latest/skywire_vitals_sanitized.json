@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-03-09",
+  "date_utc": "2026-03-10",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -29,7 +29,7 @@
         "height": null,
         "current_supply": "23827698.000000",
         "total_supply": "25000000.000000",
-        "coin_hours": "1137420202442",
+        "coin_hours": "1137875916718",
         "note": null
       }
     },
@@ -77,9 +77,9 @@
       "summary": {
         "visors": 0,
         "proxies": 951,
-        "vpn": 654,
-        "transports": 2863,
-        "dmsg_entries": 3225,
+        "vpn": 641,
+        "transports": 1406,
+        "dmsg_entries": 3239,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
@@ -152,6 +152,17 @@
               }
             },
             {
+              "address": "03b59b8aedc2875570307e0d748c6d24de035b33181ddb52394a2fb40f88d34a6b:44",
+              "type": "vpn",
+              "version": "v1.3.33",
+              "geo": {
+                "lat": -6.24,
+                "lon": 106.82,
+                "country": "ID",
+                "region": "JK"
+              }
+            },
+            {
               "address": "02c660b48c702971ae930d056b9c3b8aabf35dd92e025988bbaaf22ac4621dfaca:44",
               "type": "vpn",
               "version": "v1.3.13",
@@ -182,17 +193,6 @@
                 "lon": 11.25,
                 "country": "IT",
                 "region": "52"
-              }
-            },
-            {
-              "address": "03c20b2d2c9a6fe5559a608ca4ba48ff3392ccff44478a9bee661ad9e8eb75afa3:44",
-              "type": "vpn",
-              "version": "v1.3.34+dirty",
-              "geo": {
-                "lat": -6.18,
-                "lon": 106.83,
-                "country": "ID",
-                "region": null
               }
             }
           ],
@@ -225,14 +225,14 @@
         {
           "__url__": "https://fiber.skywire.dev/api/status",
           "__ok__": false,
-          "__status__": 0,
-          "__error__": "ReadTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Read timed out. (read timeout=12.0)"
+          "__status__": 404,
+          "__error__": null
         },
         {
           "__url__": "https://fiber.skywire.dev/api/metrics",
           "__ok__": false,
-          "__status__": 0,
-          "__error__": "ReadTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Read timed out. (read timeout=12.0)"
+          "__status__": 404,
+          "__error__": null
         }
       ],
       "summary": {
