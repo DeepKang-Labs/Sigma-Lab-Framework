@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-03-19",
+  "date_utc": "2026-03-20",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -76,10 +76,10 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 859,
-        "vpn": 470,
-        "transports": 16722,
-        "dmsg_entries": 3235,
+        "proxies": 847,
+        "vpn": 443,
+        "transports": 17975,
+        "dmsg_entries": 3181,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
@@ -128,14 +128,14 @@
               }
             },
             {
-              "address": "03d3010477663e8b95d677e490a5b08cfa1913d1f38cbe02a3af383b1858378f6f:3",
+              "address": "0283f71bdde07e8b454d144039f7e97407a25c756d30ade1e4a0bdda0ff2ff5c05:3",
               "type": "skysocks",
-              "version": "v1.3.36",
+              "version": "v1.3.34+dirty",
               "geo": {
-                "lat": 1.31,
-                "lon": 103.68,
-                "country": "SG",
-                "region": null
+                "lat": -7.25,
+                "lon": 112.74,
+                "country": "ID",
+                "region": "JI"
               }
             }
           ],
@@ -152,14 +152,25 @@
               }
             },
             {
+              "address": "03a716d7f337740ee05a24f28a7477f9d5ee56cc7541739584d29f0c943f03291c:44",
+              "type": "vpn",
+              "version": "v1.3.34+dirty",
+              "geo": {
+                "lat": -6.18,
+                "lon": 106.83,
+                "country": "ID",
+                "region": null
+              }
+            },
+            {
               "address": "032d0bfbdcdcfa5865b82705da21feb6c367ce90bcd04da527315014c746c69353:44",
               "type": "vpn",
               "version": "v1.3.33",
               "geo": {
-                "lat": 3.58,
-                "lon": 98.68,
+                "lat": -6.18,
+                "lon": 106.83,
                 "country": "ID",
-                "region": "SU"
+                "region": null
               }
             },
             {
@@ -174,25 +185,14 @@
               }
             },
             {
-              "address": "03a91f75c3f99a7c9c318ea8c911c470caaf1d87ced8c101f8a0b359cc4f4b0847:44",
+              "address": "0283f71bdde07e8b454d144039f7e97407a25c756d30ade1e4a0bdda0ff2ff5c05:44",
               "type": "vpn",
               "version": "v1.3.34+dirty",
               "geo": {
-                "lat": -6.18,
-                "lon": 106.83,
+                "lat": -7.25,
+                "lon": 112.74,
                 "country": "ID",
-                "region": null
-              }
-            },
-            {
-              "address": "0248abbc068aa008b58569a220a66274d872b06a9d83a7f64227a1973ae83d87b9:44",
-              "type": "vpn",
-              "version": "v1.3.34+dirty",
-              "geo": {
-                "lat": 3.58,
-                "lon": 98.68,
-                "country": "ID",
-                "region": "SU"
+                "region": "JI"
               }
             }
           ],
@@ -225,14 +225,14 @@
         {
           "__url__": "https://fiber.skywire.dev/api/status",
           "__ok__": false,
-          "__status__": 0,
-          "__error__": "ReadTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Read timed out. (read timeout=12.0)"
+          "__status__": 404,
+          "__error__": null
         },
         {
           "__url__": "https://fiber.skywire.dev/api/metrics",
           "__ok__": false,
-          "__status__": 0,
-          "__error__": "ReadTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Read timed out. (read timeout=12.0)"
+          "__status__": 404,
+          "__error__": null
         }
       ],
       "summary": {
