@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-04-02",
+  "date_utc": "2026-04-03",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -29,7 +29,7 @@
         "height": null,
         "current_supply": "23827698.000000",
         "total_supply": "25000000.000000",
-        "coin_hours": "1148779780481",
+        "coin_hours": "1149411480539",
         "note": null
       }
     },
@@ -76,10 +76,10 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 1131,
-        "vpn": 647,
-        "transports": 9867,
-        "dmsg_entries": 3235,
+        "proxies": 1137,
+        "vpn": 657,
+        "transports": 10292,
+        "dmsg_entries": 3225,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
@@ -174,6 +174,17 @@
               }
             },
             {
+              "address": "037e464b028a17c2f138712314f0fcbeefa28e9a24968245ae4e6c6ef4a5dda4f1:44",
+              "type": "vpn",
+              "version": "v1.3.37",
+              "geo": {
+                "lat": 34.77,
+                "lon": 113.72,
+                "country": "CN",
+                "region": null
+              }
+            },
+            {
               "address": "02f4af995daddc0851e76956f330b93270de9db7d39add71667c2960c608d6be9d:44",
               "type": "vpn",
               "version": "v1.3.39",
@@ -182,17 +193,6 @@
                 "lon": 106.68,
                 "country": "ID",
                 "region": "BT"
-              }
-            },
-            {
-              "address": "021ecc10f16abc6111eb798512ceb3d22e1ed107dd321290746d4bc56b5ffd2510:44",
-              "type": "vpn",
-              "version": "v1.3.37",
-              "geo": {
-                "lat": -6.18,
-                "lon": 106.83,
-                "country": "ID",
-                "region": null
               }
             }
           ],
@@ -226,13 +226,13 @@
           "__url__": "https://fiber.skywire.dev/api/status",
           "__ok__": false,
           "__status__": 0,
-          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/status (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f0cff2c8690>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
+          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/status (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f754a5ac7d0>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
         },
         {
           "__url__": "https://fiber.skywire.dev/api/metrics",
           "__ok__": false,
           "__status__": 0,
-          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/metrics (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f0cff2c95d0>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
+          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/metrics (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f754a5ad9d0>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
         }
       ],
       "summary": {
