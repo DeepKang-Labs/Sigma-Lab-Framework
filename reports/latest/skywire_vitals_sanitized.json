@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-04-13",
+  "date_utc": "2026-04-14",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -29,7 +29,7 @@
         "height": null,
         "current_supply": "23827698.000000",
         "total_supply": "25000000.000000",
-        "coin_hours": "1154609918132",
+        "coin_hours": "1155409203299",
         "note": null
       }
     },
@@ -76,118 +76,118 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 983,
-        "vpn": 520,
-        "transports": 5747,
-        "dmsg_entries": 6043,
+        "proxies": 1072,
+        "vpn": 758,
+        "transports": 4825,
+        "dmsg_entries": 6477,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
             {
-              "address": "03ca55bad553a4c67161a635d365d8bbc1d6873f49a8b7c6662c38eb1aa6e66bca:3",
+              "address": "03d9f63a40bf45e8b19c1ebbdcc8d573944638339bae911be5b7f6c0ce75fcbbe5:3",
               "type": "skysocks",
-              "version": "v1.3.41",
+              "version": "v1.3.43",
               "geo": {
-                "lat": 52.38,
-                "lon": 4.9,
-                "country": "NL",
-                "region": "NH"
+                "lat": 1.36,
+                "lon": 103.89,
+                "country": "SG",
+                "region": null
               }
             },
             {
-              "address": "03e7d7b63d14962a397f4b5fc63e8fb74cfae0906b98191d55e97e39a4927b53a0:3",
+              "address": "02ab84fdc8af8b137997d6fb594043b090a75b1e63e470e93970afac36602a4cea:3",
               "type": "skysocks",
               "version": "v1.3.45",
               "geo": {
-                "lat": -6.22,
+                "lat": -6.21,
                 "lon": 106.84,
                 "country": "ID",
                 "region": "JK"
               }
             },
             {
-              "address": "03296bed7e48469d41421d927266ea066ee8b21ea91f5a4909e3bd218a3fb69f8f:3",
+              "address": "03a16aebebb5470efef4a1fccdfe492e5bea3358bb202e8455605218a3cc4b67de:3",
               "type": "skysocks",
-              "version": "v1.3.39",
+              "version": "v1.3.45",
               "geo": {
-                "lat": 28.77,
-                "lon": -81.28,
-                "country": "US",
-                "region": "FL"
+                "lat": -6.21,
+                "lon": 106.84,
+                "country": "ID",
+                "region": "JK"
               }
             },
             {
-              "address": "026d85e7c76fdd7ae161651f2bbe01195fffe1767ed65f901b88dd2f889624d378:3",
+              "address": "0316d729846b685dcbb69540fc49b3ad129f0c07ca3794a7e6fd0d1d229f108aae:3",
               "type": "skysocks",
-              "version": "v1.3.43",
+              "version": "v1.3.45",
               "geo": {
-                "lat": -5.15,
-                "lon": 119.43,
-                "country": "ID",
-                "region": "SN"
+                "lat": -33.81,
+                "lon": 150.98,
+                "country": "AU",
+                "region": "NSW"
               }
             },
             {
-              "address": "02dcfaf86d573f6a7ea8c647776ff6cbdfbd7805be4a0141b22d4c071c3a0cfe67:3",
+              "address": "02af35eaa56eafe3d33dbc49bd6330222aca631065aa6bf9bce08d197d7293fc94:3",
               "type": "skysocks",
-              "version": "v1.3.31",
+              "version": "v1.3.28",
               "geo": {
-                "lat": -6.18,
-                "lon": 106.83,
-                "country": "ID",
-                "region": null
+                "lat": 43.22,
+                "lon": 27.91,
+                "country": "BG",
+                "region": "03"
               }
             }
           ],
           "vpn": [
             {
-              "address": "03e7d7b63d14962a397f4b5fc63e8fb74cfae0906b98191d55e97e39a4927b53a0:44",
+              "address": "03d9f63a40bf45e8b19c1ebbdcc8d573944638339bae911be5b7f6c0ce75fcbbe5:44",
+              "type": "vpn",
+              "version": "v1.3.43",
+              "geo": {
+                "lat": 1.36,
+                "lon": 103.89,
+                "country": "SG",
+                "region": null
+              }
+            },
+            {
+              "address": "03a16aebebb5470efef4a1fccdfe492e5bea3358bb202e8455605218a3cc4b67de:44",
               "type": "vpn",
               "version": "v1.3.45",
               "geo": {
-                "lat": -6.22,
+                "lat": -6.21,
                 "lon": 106.84,
                 "country": "ID",
                 "region": "JK"
               }
             },
             {
-              "address": "03296bed7e48469d41421d927266ea066ee8b21ea91f5a4909e3bd218a3fb69f8f:44",
+              "address": "02b2c1b3ee9e40ec27c1c59b7578a1d5081a82d0958dd6f0d5dde4783975e6e96e:44",
               "type": "vpn",
-              "version": "v1.3.39",
+              "version": "v1.3.37",
               "geo": {
-                "lat": 28.77,
-                "lon": -81.28,
+                "lat": 27.32,
+                "lon": -80.35,
                 "country": "US",
                 "region": "FL"
               }
             },
             {
-              "address": "02302644299b58b4486b555d339ef9cbad49bcdf8a26cb052e2c16fd819a0f287e:44",
+              "address": "02af35eaa56eafe3d33dbc49bd6330222aca631065aa6bf9bce08d197d7293fc94:44",
               "type": "vpn",
-              "version": "v1.3.43",
+              "version": "v1.3.28",
               "geo": {
-                "lat": -34.85,
-                "lon": -56.22,
-                "country": "UY",
-                "region": "MO"
+                "lat": 43.22,
+                "lon": 27.91,
+                "country": "BG",
+                "region": "03"
               }
             },
             {
-              "address": "039de4748b911b374c8ca0ce413c700acc41252f1a3f283cc241c18dc992d1b92c:44",
+              "address": "02aa4893366f4629a91f5f763061feb8e204e4835001c90f4e3393dabbe90e42e4:44",
               "type": "vpn",
-              "version": "v1.3.43",
-              "geo": {
-                "lat": 35.68,
-                "lon": 139.68,
-                "country": "JP",
-                "region": "13"
-              }
-            },
-            {
-              "address": "0324d126bcb472388274e50024cf0dc965fa8502c21bff2fbaa7b53354ec5dda63:44",
-              "type": "vpn",
-              "version": "v1.3.43",
+              "version": "v1.3.45",
               "geo": {
                 "lat": -7.15,
                 "lon": 112.66,
@@ -226,13 +226,13 @@
           "__url__": "https://fiber.skywire.dev/api/status",
           "__ok__": false,
           "__status__": 0,
-          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/status (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7fb232910750>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
+          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/status (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f28b6fa1d90>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
         },
         {
           "__url__": "https://fiber.skywire.dev/api/metrics",
           "__ok__": false,
           "__status__": 0,
-          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/metrics (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7fb232911890>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
+          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/metrics (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f28b6fa3010>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
         }
       ],
       "summary": {
