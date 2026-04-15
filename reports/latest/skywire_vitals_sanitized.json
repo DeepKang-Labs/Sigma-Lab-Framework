@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-04-14",
+  "date_utc": "2026-04-15",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -29,7 +29,7 @@
         "height": null,
         "current_supply": "23827698.000000",
         "total_supply": "25000000.000000",
-        "coin_hours": "1155409203299",
+        "coin_hours": "1155776567870",
         "note": null
       }
     },
@@ -76,10 +76,10 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 1072,
-        "vpn": 758,
-        "transports": 4825,
-        "dmsg_entries": 6477,
+        "proxies": 1051,
+        "vpn": 742,
+        "transports": 4631,
+        "dmsg_entries": 6557,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
@@ -128,14 +128,14 @@
               }
             },
             {
-              "address": "02af35eaa56eafe3d33dbc49bd6330222aca631065aa6bf9bce08d197d7293fc94:3",
+              "address": "0253a42ea847a2e86abf47edcb816f817c5c901899aef7dd863d9be6dfff4fd968:3",
               "type": "skysocks",
-              "version": "v1.3.28",
+              "version": "v1.3.45",
               "geo": {
-                "lat": 43.22,
-                "lon": 27.91,
-                "country": "BG",
-                "region": "03"
+                "lat": 52.38,
+                "lon": 4.9,
+                "country": "NL",
+                "region": "NH"
               }
             }
           ],
@@ -226,13 +226,13 @@
           "__url__": "https://fiber.skywire.dev/api/status",
           "__ok__": false,
           "__status__": 0,
-          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/status (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f28b6fa1d90>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
+          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/status (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7ff55ced4210>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
         },
         {
           "__url__": "https://fiber.skywire.dev/api/metrics",
           "__ok__": false,
           "__status__": 0,
-          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/metrics (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7f28b6fa3010>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
+          "__error__": "ConnectTimeout: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/metrics (Caused by ConnectTimeoutError(<HTTPSConnection(host='fiber.skywire.dev', port=443) at 0x7ff55ced5ad0>, 'Connection to fiber.skywire.dev timed out. (connect timeout=12.0)'))"
         }
       ],
       "summary": {
