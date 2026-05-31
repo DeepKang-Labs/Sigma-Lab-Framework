@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-05-30",
+  "date_utc": "2026-05-31",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -76,26 +76,15 @@
       ],
       "summary": {
         "visors": 0,
-        "proxies": 870,
-        "vpn": 492,
-        "transports": 8648,
-        "dmsg_entries": 1119,
+        "proxies": 824,
+        "vpn": 424,
+        "transports": 8573,
+        "dmsg_entries": 1034,
         "rf_status": "404 (ok=0)",
         "samples": {
           "proxy": [
             {
-              "address": "0246834bf9cf11972cdd17bc0389076ab2d1c405f95437ef95e7d5ee860229ea8b:3",
-              "type": "skysocks",
-              "version": "v1.3.59",
-              "geo": {
-                "lat": -6.18,
-                "lon": 106.83,
-                "country": "ID",
-                "region": "JK"
-              }
-            },
-            {
-              "address": "03b5a2848c732aa6cccd2eae61f9d3991be050389433beddcef05a8cb85d70a3e0:3",
+              "address": "036df68c94a28d3ec71a2e11b2b9d3b16211ae69b52babe75915e9fcd638f1c536:3",
               "type": "skysocks",
               "version": "v1.3.46",
               "geo": {
@@ -106,9 +95,20 @@
               }
             },
             {
-              "address": "029ee0276559b06b07262d4951e298338e3d21340e9bf5af457f812cf2e19cd210:3",
+              "address": "0287ac4ef3d2ede7b124014ac5e2768c5b009c529c5d86861c371fb8ab4d0b0251:3",
               "type": "skysocks",
-              "version": "v1.3.59",
+              "version": "v1.3.61",
+              "geo": {
+                "lat": 1.14,
+                "lon": 104.01,
+                "country": "ID",
+                "region": "RI"
+              }
+            },
+            {
+              "address": "031e85aed268a57ea422b6cbb0d27209d430e146a7a40d4f4e17405d94cb443a5b:3",
+              "type": "skysocks",
+              "version": "v1.3.51",
               "geo": {
                 "lat": 51.51,
                 "lon": -0.02,
@@ -117,25 +117,25 @@
               }
             },
             {
-              "address": "02553b60c07708aceedc4130cc77a86f9555a9f9ae9c0e6221fa3b7eb4eb241cad:3",
-              "type": "skysocks",
-              "version": "v1.3.47",
-              "geo": {
-                "lat": 35.69,
-                "lon": 139.69,
-                "country": "JP",
-                "region": "13"
-              }
-            },
-            {
-              "address": "02618f322f7e48d92165ac981de50d16a367016155f111a0950428986f35ae98e2:3",
+              "address": "030d1698e6555f71277a48fbdf5275c983a0a906191089eb9b1cdbdf06248bcb8e:3",
               "type": "skysocks",
               "version": "v1.3.51",
               "geo": {
-                "lat": -6.23,
-                "lon": 106.83,
-                "country": "ID",
-                "region": "JK"
+                "lat": 51.51,
+                "lon": -0.02,
+                "country": "GB",
+                "region": "ENG"
+              }
+            },
+            {
+              "address": "0337cf2872ed41c1ffb1f5205e93e7a4bc55b4a5e46942e11f444b2e5d42807cc5:3",
+              "type": "skysocks",
+              "version": "v1.3.28",
+              "geo": {
+                "lat": 3.14,
+                "lon": 101.69,
+                "country": "MY",
+                "region": "14"
               }
             }
           ],
@@ -152,47 +152,47 @@
               }
             },
             {
-              "address": "02553b60c07708aceedc4130cc77a86f9555a9f9ae9c0e6221fa3b7eb4eb241cad:44",
-              "type": "vpn",
-              "version": "v1.3.47",
-              "geo": {
-                "lat": 35.69,
-                "lon": 139.69,
-                "country": "JP",
-                "region": "13"
-              }
-            },
-            {
-              "address": "034c1098131cda1c7342c4d51f8c7cb718e08be4387fc0263866846c1142ec4708:44",
-              "type": "vpn",
-              "version": "v1.3.47",
-              "geo": {
-                "lat": 1.29,
-                "lon": 103.85,
-                "country": "SG",
-                "region": null
-              }
-            },
-            {
-              "address": "038ab4af9290de7688cb6dd827c2a601a28ef25894ea5da1105b9bd89f5d25f946:44",
+              "address": "03b8bd1d362de13fefd7ba2f25d5aeb423a27218a772c1ba1c3dfe45d3f87745a0:44",
               "type": "vpn",
               "version": "v1.3.53",
               "geo": {
-                "lat": -7.27,
-                "lon": 110.48,
+                "lat": -6.19,
+                "lon": 106.84,
                 "country": "ID",
-                "region": "JT"
+                "region": "JK"
               }
             },
             {
-              "address": "02af0705a329a64cd7ce1137737b384e4dfda733129d3d354f71355fdb7ad2dabe:44",
+              "address": "036df68c94a28d3ec71a2e11b2b9d3b16211ae69b52babe75915e9fcd638f1c536:44",
               "type": "vpn",
-              "version": "v1.3.47",
+              "version": "v1.3.46",
               "geo": {
-                "lat": -7.15,
-                "lon": 112.66,
+                "lat": -34.85,
+                "lon": -56.22,
+                "country": "UY",
+                "region": "MO"
+              }
+            },
+            {
+              "address": "022b6b852f865ec1ca1c61af6c86fa27b0c089f5eed753990495351fb2961bda2b:44",
+              "type": "vpn",
+              "version": "v1.3.51",
+              "geo": {
+                "lat": -34.89,
+                "lon": -56.19,
+                "country": "UY",
+                "region": "MO"
+              }
+            },
+            {
+              "address": "02acbd7b966057002f5826814c1c44c634b5422c6a3b8170be21ab36287ef6360a:44",
+              "type": "vpn",
+              "version": "v1.3.53",
+              "geo": {
+                "lat": -6.22,
+                "lon": 106.84,
                 "country": "ID",
-                "region": "JI"
+                "region": "JK"
               }
             }
           ],
