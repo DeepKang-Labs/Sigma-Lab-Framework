@@ -1,0 +1,248 @@
+{
+  "date_utc": "2026-06-04",
+  "meta": {
+    "repo": "DeepKang-Labs/Sigma-Lab-Framework",
+    "agent": "SkywireVitalSigns v3.4.0"
+  },
+  "groups": [
+    {
+      "name": "explorer",
+      "endpoints": [
+        "https://explorer.skycoin.com/api/blockchain/metadata",
+        "https://explorer.skycoin.com/api/coinSupply"
+      ],
+      "payloads": [
+        {
+          "__url__": "https://explorer.skycoin.com/api/blockchain/metadata",
+          "__ok__": true,
+          "__status__": 200,
+          "__error__": null
+        },
+        {
+          "__url__": "https://explorer.skycoin.com/api/coinSupply",
+          "__ok__": true,
+          "__status__": 200,
+          "__error__": null
+        }
+      ],
+      "summary": {
+        "height": null,
+        "current_supply": "24033374.000000",
+        "total_supply": "25000000.000000",
+        "coin_hours": "1179682100527",
+        "note": null
+      }
+    },
+    {
+      "name": "public",
+      "endpoints": [
+        "https://sd.skycoin.com/api/services?type=proxy",
+        "https://sd.skycoin.com/api/services?type=vpn",
+        "https://tpd.skywire.skycoin.com/all-transports",
+        "https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries",
+        "https://rf.skywire.skycoin.com/"
+      ],
+      "payloads": [
+        {
+          "__url__": "https://sd.skycoin.com/api/services?type=proxy",
+          "__ok__": true,
+          "__status__": 200,
+          "__error__": null
+        },
+        {
+          "__url__": "https://sd.skycoin.com/api/services?type=vpn",
+          "__ok__": true,
+          "__status__": 200,
+          "__error__": null
+        },
+        {
+          "__url__": "https://tpd.skywire.skycoin.com/all-transports",
+          "__ok__": true,
+          "__status__": 200,
+          "__error__": null
+        },
+        {
+          "__url__": "https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries",
+          "__ok__": true,
+          "__status__": 200,
+          "__error__": null
+        },
+        {
+          "__url__": "https://rf.skywire.skycoin.com/",
+          "__ok__": false,
+          "__status__": 404,
+          "__error__": null
+        }
+      ],
+      "summary": {
+        "visors": 0,
+        "proxies": 892,
+        "vpn": 391,
+        "transports": 14087,
+        "dmsg_entries": 1097,
+        "rf_status": "404 (ok=0)",
+        "samples": {
+          "proxy": [
+            {
+              "address": "0272b01572218852f205afe80ac837ffb3eed36489fd4ab45efeed33390febcf2c:3",
+              "type": "skysocks",
+              "version": "v1.3.53",
+              "geo": {
+                "lat": -6.18,
+                "lon": 106.83,
+                "country": "ID",
+                "region": null
+              }
+            },
+            {
+              "address": "030d9aa8aaf6ec99f5930c553d71eb45840708f7d1965e05df0823a97cd04617dc:3",
+              "type": "skysocks",
+              "version": "v1.3.53",
+              "geo": {
+                "lat": -20.3,
+                "lon": 57.58,
+                "country": "MU",
+                "region": null
+              }
+            },
+            {
+              "address": "029712b4caa8b28fb7a0ebe575bbf78f8a3a8e5dfa6ac0e78d11c831fccc5c9235:3",
+              "type": "skysocks",
+              "version": "v1.3.53",
+              "geo": {
+                "lat": 1.31,
+                "lon": 103.68,
+                "country": "SG",
+                "region": null
+              }
+            },
+            {
+              "address": "0248838c8a25ca99b162b505693d3b8b2d50bb9def3e8e3fc6cbaf748dcdb23765:3",
+              "type": "skysocks",
+              "version": "v1.3.51",
+              "geo": {
+                "lat": -6.18,
+                "lon": 106.83,
+                "country": "ID",
+                "region": null
+              }
+            },
+            {
+              "address": "0281ce6054aa059e0adec1b49b99ae84ffa425e764be935d13f4cf46a8e89b3de0:3",
+              "type": "skysocks",
+              "version": "v1.3.51",
+              "geo": {
+                "lat": 50.11,
+                "lon": 14.41,
+                "country": "CZ",
+                "region": "10"
+              }
+            }
+          ],
+          "vpn": [
+            {
+              "address": "030d9aa8aaf6ec99f5930c553d71eb45840708f7d1965e05df0823a97cd04617dc:44",
+              "type": "vpn",
+              "version": "v1.3.53",
+              "geo": {
+                "lat": -20.3,
+                "lon": 57.58,
+                "country": "MU",
+                "region": null
+              }
+            },
+            {
+              "address": "0272b01572218852f205afe80ac837ffb3eed36489fd4ab45efeed33390febcf2c:44",
+              "type": "vpn",
+              "version": "v1.3.53",
+              "geo": {
+                "lat": -6.18,
+                "lon": 106.83,
+                "country": "ID",
+                "region": null
+              }
+            },
+            {
+              "address": "0270ab1f8f6e656ea92e0176942cd17c8eb76cd8ca7e274cc4a4824c0dc1a88ef3:44",
+              "type": "vpn",
+              "version": "v1.3.53",
+              "geo": {
+                "lat": -6.18,
+                "lon": 106.83,
+                "country": "ID",
+                "region": null
+              }
+            },
+            {
+              "address": "0323c77f295e4930dbb053b6109dae1a992a996e9858cb000a85636e5967c27ae9:44",
+              "type": "vpn",
+              "version": "v1.3.47",
+              "geo": {
+                "lat": 33.82,
+                "lon": -118.27,
+                "country": "US",
+                "region": "CA"
+              }
+            },
+            {
+              "address": "02f854e60182fab2e559b894839b1d5c44d781543219791e4bd83976ba8332356e:44",
+              "type": "vpn",
+              "version": "v1.3.63",
+              "geo": {
+                "lat": 45.42,
+                "lon": -122.77,
+                "country": "US",
+                "region": "OR"
+              }
+            }
+          ],
+          "visor": []
+        }
+      }
+    },
+    {
+      "name": "nodes",
+      "endpoints": [],
+      "payloads": [],
+      "summary": {
+        "nodes_seen_ok": [
+          0,
+          0
+        ],
+        "latency_avg_ms": null,
+        "uptime_ratio_avg": null,
+        "ut_note": "PK list loaded (private), metrics omitted by design."
+      },
+      "visors_pks": []
+    },
+    {
+      "name": "fiber",
+      "endpoints": [
+        "https://fiber.skywire.dev/api/status",
+        "https://fiber.skywire.dev/api/metrics"
+      ],
+      "payloads": [
+        {
+          "__url__": "https://fiber.skywire.dev/api/status",
+          "__ok__": false,
+          "__status__": 404,
+          "__error__": null
+        },
+        {
+          "__url__": "https://fiber.skywire.dev/api/metrics",
+          "__ok__": false,
+          "__status__": 404,
+          "__error__": null
+        }
+      ],
+      "summary": {
+        "endpoints_seen_ok": [
+          2,
+          0
+        ],
+        "height": null,
+        "peers": null
+      }
+    }
+  ]
+}
