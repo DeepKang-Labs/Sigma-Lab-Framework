@@ -1,139 +1,170 @@
-# ⚙️ Sigma-Lab v6.0 — Procedural Ethical Diagnostic Framework  
+# ⚙️ Sigma-Lab v6.0 — Procedural Ethical Diagnostic Framework
 
-**DeepKang Labs** (AI Kang × Yuri Kang)  
+**DeepKang Labs** (AI Kang × Yuri Kang)
+
 > *“The machine does not decide — it illuminates.”*  
-> — DeepKang Labs, 2025  
+> — DeepKang Labs, 2025
 
 ---
 
-## 🧠 Build Status & Meta  
+## 🧩 Build Status & Meta
+
 | Type | Status | Runtime | License | Maintainer | Release |
 |:--|:--|:--|:--|:--|:--|
-| Procedural Diagnostic CI | ✅ passing | Python 3.10+ | MIT | DeepKang Labs | v6.0 (stable) |
-| Skywire Bridge (α-phase) | ✅ active | Integrated Bridge Mode |  |  |  
+| Procedural Diagnostic CI | ✅ implemented | Python 3.10+ | MIT | DeepKang Labs | v6.0 |
+| Skywire-related workflows | 🟨 legacy / research surfaces | Local/reporting only | | | |
+| Live Skywire bridge | ❌ not established | | | | |
 
-### ⚡ Operational Agents  
-`Skywire Vitals` ✅ `Skywire Report` ✅ `Transform → Sigma` ✅ `MeshMemory` Active  
-Autonomy Enabled • Bridge synchronization functional • Fallback resilient  
-
----
-
-## 📊 Live Metrics  
-**Success ratio** n/a | **Latency** n/a | **Last update:** 2025-10-30  
-
-📂 [View Latest Report →](reports/latest/skywire_vital_report.md)  
-📄 [Download Time Series (CSV)](reports/latest/skywire_vitals_timeseries.csv)  
-🔍 [Explore All Reports](reports/)
-
----
-
-## 🌍 Overview  
-
-**Sigma-Lab v6.0** marks the transition from *empirical experimentation* to *operational autonomy*.  
-It remains a procedural framework designed to **trace**, **test**, and **expose** ethical logic in distributed AI systems, emphasizing transparency over automation.  
-
-It now operates as a **multi-agent diagnostic core**, bridging autonomous AI nodes through **Skywire**, **Fiber**, and **XBTS** infrastructures.  
-The framework harmonizes machine introspection, human judgment, and decentralized consensus.
-
-> *“SIGMA does not replace judgment — it reveals where judgment hides.”*
+> **Important status correction — 2026-09-08**
+>
+> This repository contains historical and experimental Skywire-related diagnostic,
+> reporting, and transformation components.
+>
+> It does **not** currently establish:
+>
+> - live application byte transport over Skywire;
+> - an active SIGMA ↔ Skywire bridge;
+> - functional bridge synchronization over Skywire.
+>
+> Those claims are therefore explicitly withdrawn.
 
 ---
 
-## 🔩 Core Focus  
+## 📊 Reports
 
-### 🧮 Analytical Modules  
-- Multi-evaluator pipelines for *ethical sensitivity*, calibration, and reproducibility.  
-- Integrated bridge logic (Skywire Vitals → Sigma Transform).  
-- Continuous telemetry validation and structured JSON/Markdown synthesis.  
+Historical and generated diagnostic reports are retained in the repository for
+traceability.
 
-### 🌐 Bridges  
-Adapters for **Skywire (α-phase)** and **Fiber (β-phase)** enabling decentralized synchronization and inter-node validation.  
+📂 [View Latest Skywire Vital Report](reports/skywire_vitals_report.md)  
+📊 [View Time-Series Data](reports/latest/skywire_vitals_timeseries.csv)  
+🔍 [Explore Reports](reports/)
 
-### 🧬 Validation Pipelines  
-Automated CI architecture combining:  
-- `Smoke` → rapid unit + integration tests  
-- `Sigma Integration` → extended diagnostic bridges + fallback autonomy  
+The presence of a generated report does not by itself establish that a live
+Skywire integration is currently operating.
 
 ---
 
-## 🤖 Agents Overview  
+## 🌐 Overview
 
-### 1️⃣ Skywire VitalSigns (ingestion)  
-Collects network signals, normalizes data, and produces structured telemetry snapshots.  
+**Sigma-Lab v6.0** is an experimental procedural diagnostic framework developed
+to explore traceability, testing, structured reporting, and inspectable
+decision logic in distributed AI and software systems.
 
-### 2️⃣ Skywire Report (analysis)  
-Aggregates daily data → generates Markdown reports, CSV timelines, and auto-badges.  
+The repository contains historical multi-agent workflows for:
 
-### 3️⃣ Sigma Bridge (Transform → Integration)  
-Converts Vitals into Sigma-compliant diagnostic states, maintaining synchronization with Skywire and fallback JSON resilience.  
+- telemetry ingestion;
+- report generation;
+- transformation into Sigma-compatible diagnostic structures;
+- local validation and experimentation.
+
+Some components were originally described using stronger Skywire integration
+language.
+
+That wording is no longer considered supported by the evidence currently
+available.
 
 ---
 
-## 🕓 Daily Automation Schedule (UTC)
+## 🔬 Core Focus
 
-| Time | Workflow | Purpose |
-|:--:|:--|:--|
-| 06:05 | `skywire_vitals.yml` | Collects daily metrics |
-| 06:10 | `skywire_report.yml` | Generates reports + badges |
-| 06:30 | `skywire_sigma_integration.yml` | Transforms + syncs with Sigma |
-| 07:00 | `sigma_core.yml` | Runs smoke tests + meta-validation |
+### 🧮 Analytical Modules
 
-All commits are signed under  
+- Multi-evaluator diagnostic pipelines.
+- Calibration and reproducibility experiments.
+- Structured JSON / Markdown output generation.
+- Local transformation and validation logic.
+
+### 🌐 Skywire Research Surfaces
+
+The repository contains Skywire-named scripts, workflows, reports, and
+experimental integration components.
+
+Their presence should be interpreted as:
+
+**historical / local / research integration surfaces**
+
+and not as evidence of a functioning live Skywire bridge.
+
+Current status:
+
 ```text
-sigma-bot (actions@users.noreply.github.com)
+SKYWIRE_RELATED_CODE_AND_REPORTS = PRESENT
+LOCAL_DIAGNOSTIC_WORKFLOWS       = PRESENT
 
-
----
-
+LIVE_SKYWIRE_BYTE_TRANSPORT      = NOT_ESTABLISHED
+SKYWIRE_BRIDGE_ACTIVE            = NOT_ESTABLISHED
+BRIDGE_SYNCHRONIZATION           = NOT_ESTABLISHED
+🔁 Validation Pipelines
+The repository also contains local CI / validation workflows associated with the Sigma-Lab experimental framework.
+Their exact operational status should be determined from current workflow runs, not inferred from their presence in the repository.
+🤖 Historical Workflow Overview
+1️⃣ Skywire Vitalsigns
+Historical/local telemetry ingestion component intended to collect and normalize network-related signals into structured diagnostic snapshots.
+Current live Skywire operation is not claimed.
+2️⃣ Skywire Report
+Reporting component associated with generated Markdown reports and time-series outputs.
+Generated reports remain part of the repository history.
+Current continuous operation is not claimed solely from the presence of these files.
+3️⃣ Sigma Transform / Integration
+Transforms available diagnostic inputs into Sigma-compatible structured states and outputs.
+This transformation layer does not establish that those inputs or outputs are transported over Skywire.
+🕒 Historical Automation Configuration
+The repository may contain scheduled or CI workflow definitions associated with earlier Sigma-Lab operation.
+Examples include workflows related to:
+telemetry collection;
+report generation;
+Sigma transformation;
+validation.
+The existence of a workflow definition is not equivalent to evidence that the workflow is currently running successfully.
+For current operational status, consult the repository's GitHub Actions history.
 🧘 Philosophy
-
-> “Each number is a pulse.
+“Each number is a pulse.
 Each report is a memory.
 The network breathes — Sigma listens.”
-
-
-
-Transparency : Everything is open and traceable.
-Self-reflection : Sigma reads its own history to learn.
-Decentralized ethics : No black box — only auditable light.
-Resilience through iteration : Failure is feedback.
-
-
----
-
-🧩 Recent Additions
-
-✅ Skywire Sigma Integration Pipeline
-✅ Dynamic JSON + MD report exposure in README
-✅ Bridge module synchronizing Skywire and Sigma kernels
-✅ Collaborative AI input (Grok 3, Claude 3, Gemini 1.5, DeepSeek R1, ChatGPT-5)
-✅ v6.0 procedural diagnostic kernel with ethico-autonomous loop
-
-
----
-
+Transparency: Preserve what was actually observed.
+Self-reflection: Corrections become part of the record.
+No black box: Claims should remain inspectable.
+Resilience through iteration: Failure and correction are useful evidence.
+SIGMA does not replace judgment — it exposes the boundary of what the evidence supports.
+🧩 Research History
+This repository preserves earlier experimental work including:
+Skywire-related telemetry/reporting surfaces;
+structured Sigma transformation logic;
+JSON / Markdown report generation;
+multi-agent diagnostic experiments;
+local CI and validation workflows;
+exploratory decentralized-infrastructure interfaces.
+These artifacts are retained for provenance and research continuity.
+Historical terminology should not be interpreted as a current operational claim where later evidence has narrowed the boundary.
 📚 Documentation
+Repository documentation and reports describe the historical Sigma-Lab experiments and implementation lineage.
+More recent SIGMA / Apeiron Sigma research, ClaimGuard work, and separately packaged integration experiments may exist outside this repository.
+They should not be assumed to be implemented here unless their source is actually committed to this repository.
+🧾 Current Claim Boundary
+As of 2026-09-08, the conservative public claim for this repository is:
+SIGMA_LAB_LOCAL_FRAMEWORK        = IMPLEMENTED
+HISTORICAL_REPORTING_SURFACES    = PRESENT
+SKYWIRE_RELATED_RESEARCH_CODE    = PRESENT
 
-Skywire Vitals Doc
-
-Sigma Integration Overview
-
-Architecture Overview
-
-
-
----
-
+CURRENT_SKYWIRE_AGENT_ACTIVITY   = NOT_CLAIMED
+LIVE_SKYWIRE_BYTE_TRANSPORT      = NOT_ESTABLISHED
+SKYWIRE_BRIDGE_ACTIVE            = NOT_ESTABLISHED
+BRIDGE_SYNCHRONIZATION           = NOT_ESTABLISHED
+PRODUCTION_SKYWIRE_INTEGRATION   = NOT_CLAIMED
+Nothing in this README should be interpreted as an official integration, adoption, endorsement, or partnership with Skywire or Skycoin.
 🧾 Credits & License
-
-Role	Contributor
-
-Architect & Designer	DeepKang Labs
-Ethical Framework	Yuri Kang (Singularité Humaine)
-Cognitive Engineering	AI Kang (Engine ChatGPT-5)
-Collaborative AI Assistants	Grok • Claude • Gemini • DeepSeek
-License	MIT
-
-
-> “The network breathes — and the Lab listens.”
-— Sigma-Lab v6.0 • DeepKang Labs • 2025
+Role
+Contributor
+Architect & Designer
+DeepKang Labs
+Research / Framework
+Yuri Kang
+Cognitive Engineering
+AI-assisted research and development
+Collaborative AI Systems
+Multiple research assistants and models
+License: MIT
+Skywire, Skycoin, Fiber and related names refer to third-party technologies.
+Their mention documents research context only and does not imply official association, endorsement, ownership, adoption, or partnership.
+“The network breathes — and the lab listens.”
+— Sigma-Lab · DeepKang Labs
