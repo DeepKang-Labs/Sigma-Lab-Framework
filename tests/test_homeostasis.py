@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
+import pytest
+pytestmark = pytest.mark.llm
 os.environ.setdefault("SIGMA_LLM_MODEL", "sshleifer/tiny-gpt2")
 
 def test_homeostasis_bounds_and_adjust():

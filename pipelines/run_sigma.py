@@ -2,6 +2,7 @@ from __future__ import annotations
 import json, yaml
 from pathlib import Path
 import numpy as np
+import argparse
 
 from engine.dynamics_core import deep_sigma_ddC
 from engine.integrators import rk4_step
@@ -11,6 +12,10 @@ from engine.context_diffusion import laplacian_from_graph
 from pipelines.feature_build import load_features_from_artifacts
 
 def main():
+    parser = argparse.ArgumentParser(description='Run a local experimental simulation; no external-network validation.')
+    parser.add_argument('--seed', type=int, default=0, help='Random seed for reproducible local simulation (default: 0).')
+    args = parser.parse_args()
+    rng = np.random.default_rng(args.seed)
     # 1) charger config + policy
     params = json.loads(Path("configs/sigma_params.json").read_text())
     policy = yaml.safe_load(Path("policy/safety_policy.yaml").read_text())
@@ -56,7 +61,7 @@ def main():
         meta_vec = np.full(d, mcoh, dtype=float)
         inter_vec = np.full(d, c_now, dtype=float)
 
-        noise = np.random.normal(0.0, 1.0, size=d)
+        noise = rng.normal(0.0, 1.0, size=d)
 
         def f(_t, y):
             # y = concat(C, dC)
@@ -72,6 +77,8 @@ def main():
         y = np.concatenate([C, dC])
         y = rk4_step(f, y, t_idx*dt, dt)
         C, dC = y[:d], y[d:]
+        if not np.all(np.isfinite(y)):
+            raise SystemExit('Simulation produced non-finite state; previous metrics were not overwritten')
 
         C_hist.append(C.copy())
         dC_hist.append(dC.copy())
@@ -91,7 +98,9 @@ def main():
         "rhoA": rhoA,
         "dt": dt
     }
-    Path("state/last_metrics.json").write_text(json.dumps(out, indent=2))
+    out.update({'seed':args.seed,'scope':'local-experimental-simulation',
+                'live_transport_established':False})
+    Path("state/last_metrics.json").write_text(json.dumps(out, indent=2, allow_nan=False),encoding='utf-8')
 
     print("[RUN] done. frac_sigma =", frac_sigma)
 

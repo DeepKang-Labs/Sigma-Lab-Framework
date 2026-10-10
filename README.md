@@ -7,6 +7,28 @@
 
 ---
 
+## Local quick start
+
+Python 3.11 or 3.12 is checked by the local diagnostic CI. No model, GPU, token or
+live-network access is required for this route.
+
+```bash
+python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -r requirements-core.txt
+python scripts/local_check.py
+```
+
+The check runs local tests and Skywire/Fiber **mapping validation**, then exercises
+memory append and priority reporting. Fresh logs are saved under `.tmp/local-checks/`.
+A demo input or successful mapping does not demonstrate live network transport.
+Two LLM integration tests are skipped explicitly unless `--run-llm` is passed.
+See [repair details and remaining limits](docs/LOCAL_REPAIR.md).
+
+The full LLM/UI profile remains in `requirements.txt`; installing it can require
+large downloads and model-specific access. It is not needed for local diagnostics.
+
 ## 🧩 Build Status & Meta
 
 | Type | Status | Runtime | License | Maintainer | Release |
@@ -94,7 +116,9 @@ LOCAL_DIAGNOSTIC_WORKFLOWS       = PRESENT
 LIVE_SKYWIRE_BYTE_TRANSPORT      = NOT_ESTABLISHED
 SKYWIRE_BRIDGE_ACTIVE            = NOT_ESTABLISHED
 BRIDGE_SYNCHRONIZATION           = NOT_ESTABLISHED
-🔁 Validation Pipelines
+```
+
+## Validation Pipelines
 The repository also contains local CI / validation workflows associated with the Sigma-Lab experimental framework.
 Their exact operational status should be determined from current workflow runs, not inferred from their presence in the repository.
 🤖 Historical Workflow Overview
