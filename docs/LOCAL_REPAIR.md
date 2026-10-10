@@ -28,6 +28,9 @@ Skywire transport, model quality or scientific validity of diagnostic proxies.
   SciPy requirements for this route. Invalid graph/CFL/gain parameters are rejected.
 * Local tests/install no longer require the model stack. LLM integration tests
   remain available through `--run-llm`; their skips are explicit.
+* The interface imports and loads its optional model only on demand. It uses the
+  supported Gradio 5 message format, binds to localhost by default, reports absent
+  model dependencies in chat and identifies the model actually loaded after fallback.
 
 ## Verification
 
@@ -39,15 +42,21 @@ memory preservation, known graph Laplacian, RK4 decay accuracy and two identical
 to generate fresh local logs and summaries. GitHub's Local diagnostics workflow
 checks Python 3.11/3.12 on Windows and Linux.
 
+A separate interface test passed on Windows with Gradio 5.50.0: localhost returned
+HTTP 200 without importing Torch or loading a model, and missing model dependencies
+were reported gracefully. CI repeats this startup check on Linux. Gradio 5 emits
+internal deprecation warnings about its future version 6 API; version 6 is excluded
+from this supported UI profile.
+
 ## Remaining external or unverified surfaces
 
 * Real Skywire/Fiber transport and mesh synchronization need an actual supported
   endpoint/protocol, operator configuration, authorization and observed traffic.
   YAML transformation is not a transport integration.
-* The Gradio/LLM route requires its separate dependencies, model weights, adequate
-  RAM/GPU resources where applicable, and any gated-model access. It was not run
-  in this repair. `requirements.txt` remains the legacy full-stack profile; the
-  lightweight profile is `requirements-core.txt`.
+* LLM generation requires separate dependencies, model weights, adequate RAM/GPU
+  resources where applicable, and any gated-model access. Model inference was not
+  run in this repair. UI startup uses `requirements-ui.txt`; `requirements.txt`
+  remains the legacy full-stack profile and `requirements-core.txt` is lightweight.
 * Historical scheduled workflows, Docker/mesh services, live data feeds and model
   quality were not validated by local tests. Their status requires separate runs;
   this repair neither fabricates external results nor restores unsupported claims.

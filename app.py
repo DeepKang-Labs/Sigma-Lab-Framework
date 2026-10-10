@@ -27,7 +27,7 @@ def import_sigma_llm():
             raise ImportError("SigmaLLM non trouvé dans sigma_llm_complete.py")
         return mod.SigmaLLM
 
-SigmaLLM = import_sigma_llm()
+SigmaLLM = None  # Import the optional model stack only when loading an agent.
 
 # ───────────────────────────────────────────────────────────────
 # Préférence modèle + chaîne de fallbacks
@@ -57,7 +57,12 @@ _active_model = None
 
 def make_agent(model_name: str):
     """Instancie SigmaLLM avec fallback en cascade si besoin."""
-    global _agent, _active_model
+    global _agent, _active_model, SigmaLLM
+    if SigmaLLM is None:
+        try:
+            SigmaLLM = import_sigma_llm()
+        except ImportError as error:
+            raise RuntimeError('The interface is available, but the optional LLM stack is missing. Install requirements.txt and configure model access.') from error
     tried = [model_name] + [m for m in FALLBACKS if m != model_name]
     last_err = None
     for m in tried:
@@ -109,7 +114,10 @@ def chat_fn(message, history, temperature, top_p):
       - history: list[(user, assistant)]
       - temperature/top_p: sliders (additional_inputs)
     """
-    agent = get_agent()
+    try:
+        agent = get_agent()
+    except Exception as error:
+        return 'Model unavailable: '+str(error)
 
     # pilote direct des curseurs de l’agent
     try:
@@ -147,7 +155,7 @@ AVAILABLE = [
 def on_change_model(new_model):
     try:
         make_agent(new_model)
-        return f"✅ Modèle chargé: {new_model}"
+        return f"Model loaded: {_active_model}"
     except Exception as e:
         return f"❌ Échec chargement {new_model}: {e}"
 
@@ -172,7 +180,7 @@ def info_text():
 # ───────────────────────────────────────────────────────────────
 # Gradio UI
 # ───────────────────────────────────────────────────────────────
-with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
+with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as demo:
     gr.Markdown("## 🧠 Sigma-LLM — S(t) / O(t) / Δcoh — Interface interactive")
 
     with gr.Row():
@@ -201,12 +209,12 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
     gr.Markdown("### 💬 Chat")
     chat = gr.ChatInterface(
         fn=chat_fn,
+        type="messages",
         additional_inputs=[temp, topp],  # ✅ sliders réellement reliés à chat_fn
-        chatbot=gr.Chatbot(height=460, avatar_images=(None, None)),
+        chatbot=gr.Chatbot(type="messages", height=460, avatar_images=(None, None), allow_tags=False),
         textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True),
         title="Sigma-LLM",
         description="Agent réflexif (Llama-3 ready). Les sorties sont archivées dans outputs/ et reports/.",
-        theme="soft",
         cache_examples=False,
     )
 
@@ -214,12 +222,7 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
 # Lancement serveur (Codespaces/localhost)
 # ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Pré-initialise pour feedback immédiat dans l’UI
-    try:
-        make_agent(PREFERRED)
-    except Exception as e:
-        print(f"[boot] warning: preferred model not available ({e}) — UI démarre avec fallback à la première requête.")
-
     port = int(os.getenv("PORT", "7860"))
-    print(f"[SigmaLLM] Gradio démarre sur 0.0.0.0:{port}", flush=True)
-    demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
+    host = os.getenv('SIGMA_BIND_HOST','127.0.0.1')
+    print(f"[SigmaLLM] Interface starting on {host}:{port}; model loading is deferred.", flush=True)
+    demo.launch(server_name=host, server_port=port, show_error=True)

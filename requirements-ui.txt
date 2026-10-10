@@ -1,0 +1,2 @@
+# Interface startup only; model weights and PyTorch are optional until inference.
+gradio>=5,<6

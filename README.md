@@ -29,6 +29,16 @@ See [repair details and remaining limits](docs/LOCAL_REPAIR.md).
 The full LLM/UI profile remains in `requirements.txt`; installing it can require
 large downloads and model-specific access. It is not needed for local diagnostics.
 
+### Optional local interface
+
+Install `requirements-ui.txt`, then run `python app.py` and open
+`http://127.0.0.1:7860`. The interface starts without importing Torch or downloading
+model weights. Generating a reply requires the separate full LLM dependencies and
+model access; missing dependencies are reported in the chat. The supported UI
+profile uses Gradio 5. Run `python -m pytest ui_tests -q` to check startup separately.
+On Windows, use a short virtual-environment path if package installation exceeds
+the operating system's path-length limit.
+
 ## 🧩 Build Status & Meta
 
 | Type | Status | Runtime | License | Maintainer | Release |
