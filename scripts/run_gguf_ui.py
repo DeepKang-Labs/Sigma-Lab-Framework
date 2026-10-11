@@ -13,13 +13,14 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--engine', type=Path, required=True)
 parser.add_argument('--model-file', type=Path, required=True)
-parser.add_argument('--alias', default='Qwen3.5-35B-A3B-Q4_K_M')
+parser.add_argument('--alias')
 parser.add_argument('--data-dir', type=Path, default=root / '.tmp' / 'gguf-local')
 parser.add_argument('--context', type=int, default=4096)
 parser.add_argument('--gpu-layers', default='auto')
 parser.add_argument('--port', type=int, default=7860)
 parser.add_argument('--server-port', type=int, default=8081)
 args = parser.parse_args()
+args.alias = args.alias or args.model_file.stem
 if not args.engine.is_file() or not args.model_file.is_file():
     parser.error('The engine executable and downloaded model must exist.')
 with args.model_file.open('rb') as stream:

@@ -502,12 +502,18 @@ class SigmaLLM:
     # ---- Génération principale
     @serialized_generation
     @torch.no_grad()
-    def generate(self, user_msg: str, max_new_tokens: int = 200, *, history=None) -> str:
+    def generate(self, user_msg: str, max_new_tokens: int = 200, *, history=None, temperature=None, top_p=None) -> str:
         if not isinstance(user_msg, str) or not user_msg.strip():
             raise ValueError('A non-empty text prompt is required.')
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 1:
             raise ValueError('max_new_tokens must be a positive integer.')
         inputs = self._build_inputs(user_msg, max_new_tokens, history=history)
+        if temperature is not None:
+            self.temp = float(temperature)
+        if top_p is not None:
+            self.top_p = float(top_p)
+        if not math.isfinite(self.temp) or self.temp <= 0 or not math.isfinite(self.top_p) or not 0 < self.top_p <= 1:
+            raise ValueError('Invalid sampling settings.')
 
         # Entropie & homéostasie
         entropy = self._entropy_next(inputs)

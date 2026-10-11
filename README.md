@@ -72,7 +72,7 @@ published SHA-256 hashes, then run:
 python scripts/run_gguf_ui.py --engine PATH_TO_LLAMA_SERVER --model-file PATH_TO_GGUF
 ```
 
-The default alias is `Qwen3.5-35B-A3B-Q4_K_M`; pass `--alias` for another model.
+The alias defaults to the GGUF filename stem; `--alias` can override its display/API identifier.
 The supervisor fits GPU layers with a 1 GiB margin, reserves a 4096-token context,
 binds the model server to `127.0.0.1:8081`, then opens Sigma on port 7860. It owns
 the model process and shuts it down when the supervisor exits normally. Session
@@ -90,6 +90,9 @@ is now opt-in through `SIGMA_HOMEOSTASIS=1` and does not override sliders by def
 Record French identity, capability, arithmetic, translation and memory examples
 using `python scripts/evaluate_local_chat.py --model MODEL_ALIAS`. These are smoke
 checks requiring inspection, not a benchmark proving correctness or safety.
+The [pinned Qwen35 profile](configs/local_qwen35_manifest.json) records expected
+download hashes and deployment settings. Native generation uses seed 42 by default
+(`SIGMA_LLM_SEED` overrides it); different hardware/backend versions may still vary.
 
 ## 🧩 Build Status & Meta
 

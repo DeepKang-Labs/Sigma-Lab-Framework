@@ -1,6 +1,7 @@
 """Record reproducible conversational smoke checks for a running local model."""
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -13,6 +14,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--model')
 parser.add_argument('--output', type=Path, default=root / '.tmp' / 'gguf-local' / 'conversation-checks.json')
 args = parser.parse_args()
+os.environ.setdefault('SIGMA_REPORTS_DIR', str(args.output.parent / 'evaluation-reports'))
 agent = LocalChatLLM(args.model)
 cases = [
     ('identity_french', 'Bonjour. Réponds en français en une phrase : qui es-tu ?', []),
@@ -33,4 +35,18 @@ for name, prompt, history in cases:
     records.append(record)
     print(json.dumps(record, ensure_ascii=False), flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps({'model': agent.model_name, 'scope': 'conversational_smoke_checks_require_human_review_not_a_quality_benchmark', 'cases': records}, ensure_ascii=False, indent=2), encoding='utf-8')
+
+history = []
+for number, prompt in enumerate(('hey salam', 'parle en français', 'Que sais-tu de toi ?',
+                                'Quel service ?', 'Who are you?',
+                                'I want to speak with you now. Who are you? Are you OK?'), 1):
+    started = time.monotonic()
+    response = agent.generate(prompt, max_new_tokens=160, history=history)
+    record = {'case': f'conversation_replay_{number}', 'prompt': prompt,
+              'history': list(history), 'response': response,
+              'seconds': round(time.monotonic() - started, 2)}
+    records.append(record)
+    history += [{'role': 'user', 'content': prompt}, {'role': 'assistant', 'content': response}]
+    print(json.dumps(record, ensure_ascii=False), flush=True)
     args.output.write_text(json.dumps({'model': agent.model_name, 'scope': 'conversational_smoke_checks_require_human_review_not_a_quality_benchmark', 'cases': records}, ensure_ascii=False, indent=2), encoding='utf-8')

@@ -1,4 +1,4 @@
-# app.py — Gradio UI pour Sigma-LLM (Llama-3 ready, Codespaces friendly)
+# Sigma local chat UI: Transformers or a loopback llama.cpp server.
 
 import os, sys, importlib.util, traceback, json, pathlib
 import gradio as gr
@@ -54,7 +54,7 @@ _agent = None
 _active_model = None
 
 def make_agent(model_name: str):
-    """Instancie SigmaLLM avec fallback en cascade si besoin."""
+    """Connect to or load the explicitly selected model."""
     global _agent, _active_model, SigmaLLM
     if SigmaLLM is None:
         try:
@@ -117,15 +117,9 @@ def chat_fn(message, history, temperature, top_p):
     except Exception as error:
         return 'Model unavailable: '+str(error)
 
-    # pilote direct des curseurs de l’agent
     try:
-        agent.temp = float(temperature)
-        agent.top_p = float(top_p)
-    except Exception:
-        pass
-
-    try:
-        reply = agent.generate(message, max_new_tokens=400, history=history)
+        reply = agent.generate(message, max_new_tokens=400, history=history,
+                               temperature=temperature, top_p=top_p)
         # garde: sauvegarder aussi pour debug rapide
         try:
             with open(LATEST_OUT, "w", encoding="utf-8") as f:
@@ -166,22 +160,14 @@ def on_reset_memory():
         return f"❌ Reset échoué: {e}"
 
 def info_text():
-    here = os.getcwd()
-    info = {
-        "active_model": _active_model,
-        "requested_model": PREFERRED,
-        "cwd": here,
-        "outputs": str(pathlib.Path(OUT).resolve()),
-        "reports": str(pathlib.Path(RP).resolve()),
-        "state": str(pathlib.Path(ST).resolve()),
-    }
-    return "```\n" + json.dumps(info, indent=2, ensure_ascii=False) + "\n```"
+    model = _active_model or PREFERRED
+    return f'**Modèle sélectionné :** {model}  \nLes rapports sont enregistrés localement.'
 
 # ───────────────────────────────────────────────────────────────
 # Gradio UI
 # ───────────────────────────────────────────────────────────────
 with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as demo:
-    gr.Markdown("## Sigma-LLM — Local generation with experimental Sigma metrics")
+    gr.Markdown("## Sigma-LLM — Assistant local")
 
     with gr.Row():
         model_dd = gr.Dropdown(
@@ -193,7 +179,7 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as de
         temp = gr.Slider(minimum=0.10, maximum=1.30, value=0.6, step=0.01, label="temperature")
         topp = gr.Slider(minimum=0.10, maximum=1.00, value=0.9, step=0.01, label="top_p")
         btn_reload = gr.Button("🔄 Recharger modèle")
-        btn_reset  = gr.Button("🧹 Reset mémoire")
+        btn_reset  = gr.Button("Nouvelle conversation")
 
     # zone d’état
     status_msg = gr.Markdown()
@@ -213,7 +199,9 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as de
         chatbot=gr.Chatbot(type="messages", height=460, avatar_images=(None, None), allow_tags=False),
         textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True),
         title="Sigma-LLM",
-        description="The selected model loads on first use. Sigma metrics are experimental proxies; they do not verify factuality or safety.",
+        description=("Conversation avec le modèle local. Demandez une réponse dans la langue de votre choix."
+                     if os.getenv('SIGMA_LLM_BACKEND') == 'llama.cpp' else
+                     "The selected model loads on first use. Sigma metrics are experimental proxies; they do not verify factuality or safety."),
         cache_examples=False,
     )
     btn_reset.click(lambda: ('New conversation started.', info_text(), [], [], None),

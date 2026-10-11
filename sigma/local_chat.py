@@ -12,6 +12,7 @@ SYSTEM_PROMPT = (
     'You are Sigma, a local AI assistant running on the user\'s computer. '
     'You are not a human or a customer service representative. '
     'Answer the actual question directly. Reply in the language requested by the user; '
+    'Keep an explicit language preference across later turns until the user changes it. '
     'when the language is unclear, use French. Do not invent meetings, services, '
     'phone calls, email capabilities, personal experiences or facts about your configuration. '
     'If asked about yourself, explain that you are a local language model, without claiming '
@@ -71,18 +72,21 @@ class LocalChatLLM:
             while len(messages) > 2 and messages[1]['role'] == 'assistant':
                 messages.pop(1)
 
-    def generate(self, user_msg, max_new_tokens=200, *, history=None):
+    def generate(self, user_msg, max_new_tokens=200, *, history=None, temperature=None, top_p=None):
         if not isinstance(user_msg, str) or not user_msg.strip():
             raise ValueError('A non-empty text prompt is required.')
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens < self.context_size:
             raise ValueError('Invalid generation token budget.')
-        if not math.isfinite(self.temp) or not 0 < self.temp <= 2 or not math.isfinite(self.top_p) or not 0 < self.top_p <= 1:
+        temperature = self.temp if temperature is None else float(temperature)
+        top_p = self.top_p if top_p is None else float(top_p)
+        if not math.isfinite(temperature) or not 0 < temperature <= 2 or not math.isfinite(top_p) or not 0 < top_p <= 1:
             raise ValueError('Invalid sampling settings.')
         with self._lock:
             messages = self._messages(user_msg, history, max_new_tokens)
             result = self._request('/v1/chat/completions', {
-                'model': self.model_name, 'messages': messages, 'temperature': self.temp,
-                'top_p': self.top_p, 'max_tokens': max_new_tokens, 'stream': False,
+                'model': self.model_name, 'messages': messages, 'temperature': temperature,
+                'top_p': top_p, 'max_tokens': max_new_tokens, 'stream': False,
+                'seed': int(os.getenv('SIGMA_LLM_SEED', '42')),
                 'chat_template_kwargs': {'enable_thinking': False},
             })
             choice = result['choices'][0]
@@ -92,6 +96,8 @@ class LocalChatLLM:
             report = {'timestamp': int(time.time()), 'model': result.get('model', self.model_name),
                       'backend': 'llama.cpp', 'prompt': user_msg, 'output': text,
                       'usage': result.get('usage'), 'finish_reason': choice.get('finish_reason'),
+                      'messages': messages, 'temperature': temperature, 'top_p': top_p,
+                      'seed': int(os.getenv('SIGMA_LLM_SEED', '42')),
                       'evaluation_scope': 'generation_only_no_quality_or_Sigma_score',
                       'history_source': 'current_browser_conversation'}
             target = self.report_dir / 'sigma_llm_last_report.json'

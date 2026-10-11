@@ -32,9 +32,10 @@ def test_interface_serves_without_loading_model(tmp_path, monkeypatch):
         assert app.chat_fn('Hello', [], 0.9, 0.9).startswith('Model unavailable:')
         assert app._agent is None
         class FakeAgent:
-            def generate(self, message, max_new_tokens, *, history):
+            def generate(self, message, max_new_tokens, *, history, temperature, top_p):
                 assert history == [{'role': 'user', 'content': 'earlier'}]
                 assert message == 'current'
+                assert (temperature, top_p) == (.6, .9)
                 return 'AI: must remain in the answer'
         app._agent = FakeAgent()
         assert app.chat_fn('current', [{'role': 'user', 'content': 'earlier'}], .6, .9) == 'AI: must remain in the answer'
