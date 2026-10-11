@@ -18,6 +18,7 @@ import functools
 from dataclasses import dataclass
 from typing import Dict, List, Any, Deque, Tuple
 from collections import deque
+from sigma.local_chat import SYSTEM_PROMPT, normalize_history
 
 # --- Unbuffered stdout pour Actions / CI ---
 try:
@@ -462,14 +463,15 @@ class SigmaLLM:
             else: self.top_p = newv
 
     # ---- Prompting universel (chat template si dispo)
-    def _build_inputs(self, user_msg: str, max_new_tokens: int = 200):
-        messages = self.conv.as_messages() + [{"role": "user", "content": user_msg}]
+    def _build_inputs(self, user_msg: str, max_new_tokens: int = 200, history=None):
+        previous = self.conv.as_messages() if history is None else normalize_history(history)
+        messages = [{'role': 'system', 'content': SYSTEM_PROMPT.format(model=self.model_name)}] + previous + [{"role": "user", "content": user_msg}]
         try:
             # Llama-3, Mistral, Phi-3 exposent un chat template
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             inputs = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)
         except (ValueError, AttributeError):
-            ctx = self.conv.render_legacy()
+            ctx = SYSTEM_PROMPT.format(model=self.model_name) + '\n' + '\n'.join(f"{m['role']}: {m['content']}" for m in previous)
             prompt = (ctx + "\nHuman: " + user_msg + "\nAI:").strip()
             inputs = self.tokenizer(prompt, return_tensors="pt")
 
@@ -500,16 +502,17 @@ class SigmaLLM:
     # ---- Génération principale
     @serialized_generation
     @torch.no_grad()
-    def generate(self, user_msg: str, max_new_tokens: int = 200) -> str:
+    def generate(self, user_msg: str, max_new_tokens: int = 200, *, history=None) -> str:
         if not isinstance(user_msg, str) or not user_msg.strip():
             raise ValueError('A non-empty text prompt is required.')
         if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 1:
             raise ValueError('max_new_tokens must be a positive integer.')
-        inputs = self._build_inputs(user_msg, max_new_tokens)
+        inputs = self._build_inputs(user_msg, max_new_tokens, history=history)
 
         # Entropie & homéostasie
         entropy = self._entropy_next(inputs)
-        self._adjust_homeostasis(entropy)
+        if os.getenv('SIGMA_HOMEOSTASIS', '0') == '1':
+            self._adjust_homeostasis(entropy)
 
         gen_kwargs = dict(
             do_sample=True,
@@ -688,7 +691,8 @@ class SigmaLLM:
             "model": getattr(self, "model_name", "unknown"),
             "prompt": prompt[-2000:], "output": output[-8000:]
         }
-        rep['evaluation_scope'] = {'metrics': 'experimental_proxies', 'judge_enabled': ENABLE_JUDGE, 'rag_enabled': ENABLE_RAG}
+        rep['evaluation_scope'] = {'metrics': 'experimental_proxies', 'judge_enabled': ENABLE_JUDGE, 'rag_enabled': ENABLE_RAG,
+                                   'homeostasis_enabled': os.getenv('SIGMA_HOMEOSTASIS', '0') == '1'}
         safe_dump_json(LAST_REPORT, rep)
         with open(EPISODES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps({

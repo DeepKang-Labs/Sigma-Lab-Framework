@@ -31,5 +31,12 @@ def test_interface_serves_without_loading_model(tmp_path, monkeypatch):
         monkeypatch.setattr(app, 'import_sigma_llm', lambda: (_ for _ in ()).throw(ImportError('missing optional dependency')))
         assert app.chat_fn('Hello', [], 0.9, 0.9).startswith('Model unavailable:')
         assert app._agent is None
+        class FakeAgent:
+            def generate(self, message, max_new_tokens, *, history):
+                assert history == [{'role': 'user', 'content': 'earlier'}]
+                assert message == 'current'
+                return 'AI: must remain in the answer'
+        app._agent = FakeAgent()
+        assert app.chat_fn('current', [{'role': 'user', 'content': 'earlier'}], .6, .9) == 'AI: must remain in the answer'
     finally:
         app.demo.close()

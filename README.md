@@ -61,6 +61,36 @@ Run `python -m pytest llm_tests -q` for real inference on a tiny locally constru
 model without network access. The two pretrained-model integration tests remain
 available through `python -m pytest --run-llm -q`.
 
+### Larger quantized model with llama.cpp
+
+Sigma also supports a separate localhost llama.cpp server. This route uses native
+GGUF inference instead of loading a full-precision model through Torch. Download
+an official Windows llama.cpp release and a compatible GGUF model, verify their
+published SHA-256 hashes, then run:
+
+```bash
+python scripts/run_gguf_ui.py --engine PATH_TO_LLAMA_SERVER --model-file PATH_TO_GGUF
+```
+
+The default alias is `Qwen3.5-35B-A3B-Q4_K_M`; pass `--alias` for another model.
+The supervisor fits GPU layers with a 1 GiB margin, reserves a 4096-token context,
+binds the model server to `127.0.0.1:8081`, then opens Sigma on port 7860. It owns
+the model process and shuts it down when the supervisor exits normally. Session
+reports live in `.tmp/gguf-local/`; model weights are not part of this repository.
+Only the UI dependencies are needed for this route (plus `truststore` on Windows).
+
+Conversation input uses the browser's current history, with a system instruction
+defining Sigma's identity and language behavior. Reset starts a fresh conversation
+without deleting previous reports. Oldest messages are removed when the tokenized
+input would exceed the server context; the identity and current message remain.
+Thinking is disabled for this chat profile. Generation reports contain usage and
+finish status, with **no invented Sigma quality score**. Transformers homeostasis
+is now opt-in through `SIGMA_HOMEOSTASIS=1` and does not override sliders by default.
+
+Record French identity, capability, arithmetic, translation and memory examples
+using `python scripts/evaluate_local_chat.py --model MODEL_ALIAS`. These are smoke
+checks requiring inspection, not a benchmark proving correctness or safety.
+
 ## 🧩 Build Status & Meta
 
 | Type | Status | Runtime | License | Maintainer | Release |

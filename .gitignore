@@ -212,3 +212,4 @@ scripts/skywire.config.yaml
 .tmp/repair/
 .tmp/local-checks/
 .tmp/llm-local/
+.tmp/gguf-local/

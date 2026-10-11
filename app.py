@@ -7,6 +7,9 @@ import gradio as gr
 # Import robuste de SigmaLLM (à la racine ou par chemin explicite)
 # ───────────────────────────────────────────────────────────────
 def import_sigma_llm():
+    if os.getenv('SIGMA_LLM_BACKEND', 'transformers') == 'llama.cpp':
+        from sigma.local_chat import LocalChatLLM
+        return LocalChatLLM
     try:
         from sigma_llm_complete import SigmaLLM
         return SigmaLLM
@@ -122,9 +125,7 @@ def chat_fn(message, history, temperature, top_p):
         pass
 
     try:
-        reply = agent.generate(message, max_new_tokens=200)
-        if isinstance(reply, str) and "AI:" in reply:
-            reply = reply.split("AI:")[-1].strip()
+        reply = agent.generate(message, max_new_tokens=400, history=history)
         # garde: sauvegarder aussi pour debug rapide
         try:
             with open(LATEST_OUT, "w", encoding="utf-8") as f:
@@ -147,6 +148,8 @@ AVAILABLE = [
     "microsoft/Phi-3-mini-4k-instruct",
     "meta-llama/Meta-Llama-3-8B-Instruct",
 ]
+if os.getenv('SIGMA_LLM_BACKEND') == 'llama.cpp':
+    AVAILABLE = [PREFERRED]
 
 def on_change_model(new_model):
     try:
@@ -187,8 +190,8 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as de
             label="Modèle",
             interactive=True,
         )
-        temp = gr.Slider(minimum=0.60, maximum=1.30, value=0.95, step=0.01, label="temperature")
-        topp = gr.Slider(minimum=0.70, maximum=0.99, value=0.95, step=0.01, label="top_p")
+        temp = gr.Slider(minimum=0.10, maximum=1.30, value=0.6, step=0.01, label="temperature")
+        topp = gr.Slider(minimum=0.10, maximum=1.00, value=0.9, step=0.01, label="top_p")
         btn_reload = gr.Button("🔄 Recharger modèle")
         btn_reset  = gr.Button("🧹 Reset mémoire")
 
@@ -201,7 +204,6 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as de
         return msg, info_text()
 
     btn_reload.click(_reload, inputs=model_dd, outputs=[status_msg, status])
-    btn_reset.click(lambda: (on_reset_memory(), info_text()), outputs=[status_msg, status])
 
     gr.Markdown("### 💬 Chat")
     chat = gr.ChatInterface(
@@ -214,6 +216,8 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as de
         description="The selected model loads on first use. Sigma metrics are experimental proxies; they do not verify factuality or safety.",
         cache_examples=False,
     )
+    btn_reset.click(lambda: ('New conversation started.', info_text(), [], [], None),
+                    outputs=[status_msg, status, chat.chatbot, chat.chatbot_state, chat.saved_input])
 
 # ───────────────────────────────────────────────────────────────
 # Lancement serveur (Codespaces/localhost)
