@@ -209,3 +209,9 @@ __marimo__/
 __pycache__/
 *.pyc
 scripts/skywire.config.yaml
+.tmp/repair/
+.tmp/local-checks/
+.tmp/llm-local/
+.tmp/gguf-local/
+.tmp/dev-sandbox/
+.tmp/dev-gateway-state/

@@ -70,8 +70,9 @@ def build_priority_matrix(mappings: Dict[str, Any]) -> Dict[str, Any]:
         # try node weights schema
         rows = _from_weighted_nodes(mappings)
 
+    fallback_used = not rows
     if not rows:
-        # very safe fallback
+        # Explicit placeholder, never a computed priority.
         rows = [{"id": "fallback", "score": 1.0}]
 
     # sorted descending by score
@@ -81,6 +82,8 @@ def build_priority_matrix(mappings: Dict[str, Any]) -> Dict[str, Any]:
         "version": "1.0",
         "count": len(rows),
         "priorities": rows,
+        "fallback_used": fallback_used,
+        "status": "fallback_no_supported_schema" if fallback_used else "computed",
     }
 
 
@@ -103,7 +106,7 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(matrix, indent=2), encoding="utf-8")
-    print(f"[PriorityMatrix] Saved → {out_path}")
+    print(f"[PriorityMatrix] Saved -> {out_path}")
 
 
 if __name__ == "__main__":

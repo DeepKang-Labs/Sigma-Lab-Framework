@@ -15,8 +15,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import yaml
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Local import
 try:
@@ -52,7 +53,7 @@ def _find_latest_vitals(discovery_root: Path) -> Path | None:
 def _write_json(out_path: Path, payload: dict) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
+        json.dump(payload, f, indent=2, ensure_ascii=False, allow_nan=False)
 
 
 def _write_markdown(md_path: Path, result: dict, source: Path) -> None:
@@ -66,6 +67,7 @@ def _write_markdown(md_path: Path, result: dict, source: Path) -> None:
     lines.append("# Skywire → Sigma Analysis\n")
     lines.append(f"**Timestamp (UTC):** {timestamp}\n")
     lines.append(f"**Source:** `{source.as_posix()}`\n")
+    lines.append('**Scope:** local file analysis; live transport is not established.\n')
     lines.append(f"**Verdict:** **{verdict}**\n")
     lines.append(f"**Overall Score:** **{score:.2f} / 100**\n")
     lines.append("\n## Component Scores (0..1)\n")
@@ -106,7 +108,7 @@ def _write_claude_report(md_path: Path, date_str: str, source: Path, duration_s:
     lines.append("\n### Processing")
     lines.append("- Command: `python network_bridge/run_network_integrated.py --network skywire ...`")
     lines.append(f"- Duration: ~{int(duration_s)} seconds")
-    lines.append("- Status: SUCCESS")
+    lines.append("- Status: SUCCESS for local processing only; live transport was not tested.")
     lines.append("\n### Output")
     out_json_name = f"reports/integrations/skywire_sigma_analysis_{date_str}.json"
     lines.append(f"- File: `{out_json_name}`")
@@ -131,7 +133,47 @@ def main() -> int:
     parser.add_argument("--out", type=str, default="", help="Optional output JSON path.")
     parser.add_argument("--also-md", action="store_true", help="Also writes a concise Markdown summary.")
     parser.add_argument("--claude-report", action="store_true", help="Writes Integration Test Report in Claude's format.")
+    parser.add_argument('--validate-only', action='store_true', help='Validate local mappings/discovery; no live network transport.')
+    parser.add_argument('--mappings', help='YAML mapping file for local discovery validation.')
+    parser.add_argument('--config', help='Sigma configuration file for local discovery validation.')
+    parser.add_argument('--formula-eval', choices=['auto','linear','simple'], default='auto')
     args = parser.parse_args()
+
+    if args.validate_only:
+        if not args.discovery or not args.mappings or not args.config or args.input:
+            parser.error('--validate-only requires --discovery, --mappings and --config')
+        if args.network.lower() not in ['skywire','fiber']:
+            parser.error('Local mapping validation supports skywire and fiber')
+        try:
+            from network_bridge.network_bridge import NetworkBridge
+            if not Path(args.config).is_file():
+                raise ValueError('Configuration file does not exist: '+args.config)
+            from sigma_lab_v4_2 import SigmaLab, OptionContext
+            with Path(args.config).open(encoding='utf-8') as config_file:
+                config = yaml.safe_load(config_file)
+            if not isinstance(config,dict):
+                raise ValueError('Configuration must be a YAML object')
+            diagnostic_engine = SigmaLab(config)
+            bridge = NetworkBridge(args.discovery,args.config,args.mappings,
+                network_name=args.network.lower(),formula_eval_mode=args.formula_eval)
+            discovery = bridge.load_discovery_data()
+            warnings = bridge.validate_discovery(discovery)
+            contexts = [] if warnings else bridge.transform_to_sigma_contexts(discovery)
+            if not contexts and not warnings:
+                raise ValueError('No decision contexts were produced')
+            report = {'mode':'local-mapping-validation','network':args.network.lower(),
+                'live_transport_established':False,'contexts':contexts,'warnings':warnings,
+                'diagnostics':[diagnostic_engine.diagnose(OptionContext(**{key:value for key,value in context.items()
+                    if key in OptionContext.__dataclass_fields__})) for context in contexts],
+                'discovery_source':'file' if (Path(args.discovery)/'decision_mapper.yaml').is_file() else 'demo',
+                'status':'invalid_input' if warnings else 'validated'}
+            output = Path(args.out) if args.out else Path('pilots/validation_logs')/(args.network.lower()+'_validate_only.json')
+            _write_json(output,report)
+            print('[LOCAL] Mapping validation saved to '+str(output)+'; no live transport tested.')
+            return 2 if warnings else 0
+        except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError) as error:
+            print('[ERROR] Local mapping validation failed: '+str(error),file=sys.stderr)
+            return 2
 
     if args.network.lower() != "skywire":
         print(f"[ERROR] Unsupported network: {args.network}", file=sys.stderr)
@@ -158,13 +200,15 @@ def main() -> int:
     t0 = time.monotonic()
     try:
         result = analyzer.evaluate_from_file(source_path)
+        result.update({'scope':'local-vitals-file-analysis','live_transport_established':False,
+                       'source':source_path.as_posix()})
     except Exception as e:
         print(f"[ERROR] Analysis failed: {e}", file=sys.stderr)
         return 1
     duration = time.monotonic() - t0
 
     # Decide outputs
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if args.out:
         out_json = Path(args.out)
     else:
@@ -203,7 +247,7 @@ def main() -> int:
         _write_claude_report(cr_md, today, source_path, duration, result, preview)
 
     print(
-        f"[OK] Skywire→Sigma done | verdict={result.get('verdict')} "
+        f"[OK] Local Skywire-data analysis done | verdict={result.get('verdict')} "
         f"| overall={result.get('overall_score')} | json={out_json.as_posix()} "
         f"| took={int(duration)}s"
     )

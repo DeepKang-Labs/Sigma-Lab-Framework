@@ -14,7 +14,7 @@ from typing import Dict, Any, Tuple
 import json
 import math
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -79,10 +79,35 @@ class SigmaAnalyzer:
           - avg_latency (ms)
           - success_ratio (0..1)
         """
-        node_count   = int(metrics.get("node_count", 0))
-        avg_uptime   = float(metrics.get("avg_uptime", 0.0))
-        avg_latency  = float(metrics.get("avg_latency", 0.0))
-        success_rat  = float(metrics.get("success_ratio", 0.0))
+        if not isinstance(metrics, dict):
+            raise ValueError('Metrics must be an object.')
+        def number(key):
+            value = metrics.get(key)
+            if isinstance(value, bool):
+                raise ValueError(f'{key} must be a finite number, not a boolean.')
+            try:
+                value = float(value)
+            except (TypeError, ValueError, OverflowError) as error:
+                raise ValueError(f'{key} is missing or invalid.') from error
+            if not math.isfinite(value):
+                raise ValueError(f'{key} must be finite.')
+            return value
+        nodes = number('node_count')
+        if nodes < 0 or not nodes.is_integer():
+            raise ValueError('node_count must be a non-negative integer.')
+        node_count = int(nodes)
+        avg_uptime = number('avg_uptime')
+        avg_latency = number('avg_latency')
+        success_rat = number('success_ratio')
+        if not 0 <= avg_uptime <= 1 or not 0 <= success_rat <= 1 or avg_latency < 0:
+            raise ValueError('Ratios must be in [0,1] and latency must be non-negative.')
+        names = ('stability','latency','resilience','equity')
+        if set(self.weights) != set(names):
+            raise ValueError('All four analyzer weights must be provided.')
+        values = [self.weights[name] for name in names]
+        if not all(type(v) in (int,float) and math.isfinite(v) and v >= 0 for v in values) or not math.isfinite(sum(values)) or sum(values) <= 0:
+            raise ValueError('Analyzer weights must be finite, non-negative and have a positive sum.')
+        weights = {name:self.weights[name]/sum(values) for name in names}
 
         # Component scores in [0..1]
         stability   = _clamp(avg_uptime * success_rat)               # strict: both must be high
@@ -98,14 +123,14 @@ class SigmaAnalyzer:
         }
 
         # Weighted overall score on 100
-        overall = 100.0 * sum(comp[k] * self.weights.get(k, 0.0) for k in comp)
+        overall = 100.0 * sum(comp[k] * weights[k] for k in comp)
         overall = round(overall, 2)
 
         verdict = self._verdict_for(overall)
         advice  = self._advice(comp, node_count, avg_latency)
 
         return {
-            "timestamp_utc": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "inputs": {
                 "node_count": node_count,
                 "avg_uptime": avg_uptime,
@@ -113,7 +138,7 @@ class SigmaAnalyzer:
                 "success_ratio": success_rat,
             },
             "component_scores": comp,               # 0..1
-            "weights": self.weights,                # echo for transparency
+            "weights": weights,                     # normalized scoring weights
             "overall_score": overall,               # 0..100
             "verdict": verdict,
             "advice": advice,
@@ -128,16 +153,23 @@ class SigmaAnalyzer:
         with path.open("r", encoding="utf-8") as f:
             raw = json.load(f)
 
-        payloads = raw.get("payloads", [])
+        if not isinstance(raw, dict):
+            raise ValueError('Vitals must be an object with a nonempty payloads list.')
+        payloads = raw.get("payloads")
+        if not isinstance(payloads, list) or not payloads or not all(isinstance(p, dict) for p in payloads):
+            raise ValueError('Vitals require a nonempty list of payload objects.')
         n = len(payloads)
 
         # Extract tolerant fields
         def get(p: dict, k: str, default: float = 0.0) -> float:
-            v = p.get(k, default)
+            v = p.get(k)
             try:
-                return float(v)
-            except Exception:
-                return default
+                value = float(v)
+            except (TypeError, ValueError, OverflowError) as error:
+                raise ValueError(f'Payload field {k} is missing or invalid.') from error
+            if isinstance(v, bool) or not math.isfinite(value) or value < 0 or (k != 'latency_ms' and value > 1):
+                raise ValueError(f'Payload field {k} is outside its valid finite range.')
+            return value
 
         avg_uptime = sum(get(p, "uptime", 0.0) for p in payloads) / max(n, 1)
         avg_latency = sum(get(p, "latency_ms", 0.0) for p in payloads) / max(n, 1)
