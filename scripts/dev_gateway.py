@@ -16,6 +16,10 @@ gateway = Gateway(root / '.tmp' / 'dev-sandbox', root / '.tmp' / 'dev-gateway-st
 if args.action == 'approve':
     result = gateway.human_apply(args.proposal_id or '', sys.stdin, sys.stdout)
 else:
-    request = json.loads(sys.stdin.read(16384))
+    try:
+        request = json.loads(sys.stdin.read(16384))
+    except ValueError:
+        gateway.audit('request', 'deny', reason='invalid_json')
+        raise
     result = gateway.dispatch(request)
 print(json.dumps(result, ensure_ascii=False, indent=2))

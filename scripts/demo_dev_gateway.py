@@ -35,6 +35,7 @@ try:
     record['proposal'] = proposal
     record['test'] = gateway.dispatch({'operation': 'test', 'proposal_id': proposal['id']})
 except (ValueError, PermissionError, KeyError) as error:
+    gateway.audit('model_proposal', 'deny', reason=type(error).__name__)
     record['error'] = type(error).__name__ + ': ' + str(error)
 record['after_sha256'] = digest(gateway.read())
 record['target_unchanged'] = record['before_sha256'] == record['after_sha256']

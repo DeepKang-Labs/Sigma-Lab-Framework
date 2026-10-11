@@ -138,6 +138,9 @@ class Gateway:
         os.close(descriptor)
         try:
             return self._review_and_apply(proposal_id, input_stream, output_stream)
+        except Exception as error:
+            self.audit('approve', 'deny', id=proposal_id, reason=type(error).__name__)
+            raise
         finally:
             lock.unlink()
 
