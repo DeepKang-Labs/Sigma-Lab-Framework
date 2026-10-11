@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-10-10",
+  "date_utc": "2026-10-11",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -113,14 +113,14 @@
         {
           "__url__": "https://fiber.skywire.dev/api/status",
           "__ok__": false,
-          "__status__": 404,
-          "__error__": null
+          "__status__": 0,
+          "__error__": "ConnectionError: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/status (Caused by NameResolutionError(\"HTTPSConnection(host='fiber.skywire.dev', port=443): Failed to resolve 'fiber.skywire.dev' ([Errno -2] Name or service not known)\"))"
         },
         {
           "__url__": "https://fiber.skywire.dev/api/metrics",
           "__ok__": false,
-          "__status__": 404,
-          "__error__": null
+          "__status__": 0,
+          "__error__": "ConnectionError: HTTPSConnectionPool(host='fiber.skywire.dev', port=443): Max retries exceeded with url: /api/metrics (Caused by NameResolutionError(\"HTTPSConnection(host='fiber.skywire.dev', port=443): Failed to resolve 'fiber.skywire.dev' ([Errno -2] Name or service not known)\"))"
         }
       ],
       "summary": {
