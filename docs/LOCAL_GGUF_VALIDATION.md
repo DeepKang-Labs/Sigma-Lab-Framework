@@ -72,6 +72,28 @@ are not imported as model memory.
 
 ## Limits
 
+### Subsequent integration pass (2026-10-11)
+
+The software suite now passes 94 tests locally: 82 Framework/adapter/broker
+tests (including the two cached pretrained checks), 11 offline tiny-model
+generation regressions and one UI check. The 15 new broker tests cover denied
+authority, path scope, hard links, noninteractive approval, expiry, consumed
+approval, backup and the fixed AST contract. They do not validate other repos.
+
+A separate expanded actual-Qwen run contains 18 recorded cases with prompts,
+responses, times and token usage. Bounded inspection assessed 17 PASS and
+one FAIL; all finished without truncation. The failed Python trace returned
+37 instead of the correct 27 and also ignored the numeric-only format.
+A previous pass returned 47 and showed language drift. Strengthening the
+language instruction restored French in the replay, but did not correct this
+trace. Observed final times were 3.41–12.05 seconds per case. These counts are
+case-specific assessments, not a general model accuracy percentage.
+
+An actual model-generated sandbox proposal passed its three fixed AST cases;
+the target file's before/after hashes were identical. A real piped approval
+attempt was rejected. No live target mutation was approved. See
+[controlled integration](GOVERNED_LOCAL_INTEGRATION.md) for the authority boundary.
+
 These are inspected conversational smoke checks on one PC, not a general quality,
 safety or scientific benchmark. The assistant can still make factual mistakes.
 Oldest messages are trimmed to fit the context. Long answers can hit the output

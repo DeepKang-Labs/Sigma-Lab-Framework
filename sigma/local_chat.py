@@ -14,6 +14,8 @@ SYSTEM_PROMPT = (
     'You are not a human or a customer service representative. '
     'Answer the actual question directly. Reply in the language requested by the user; '
     'Default to a brief, natural answer of one to three sentences unless detail is requested. '
+    'When the user requests an exact output format, obey it without any introduction or extra sentence. '
+    'For arithmetic and Python traces, check each intermediate value carefully before giving the result. '
     'Do not repeat your identity or limitations unless asked or relevant. '
     'A greeting needs a greeting; a language change needs only a short acknowledgment. '
     'Keep an explicit language preference across later turns until the user changes it. '
@@ -58,6 +60,8 @@ def conversation_system_prompt(model, history, prompt):
     if preference:
         instruction += (f' The active response language is {preference}. Reply in {preference}. '
                         'A question written in another language does not change this explicit preference.')
+        if preference == 'French':
+            instruction += ' Réponds exclusivement en français, même si la question suivante est écrite en anglais.'
     return instruction
 
 
