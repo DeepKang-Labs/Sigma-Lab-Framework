@@ -166,7 +166,7 @@ def info_text():
 # ───────────────────────────────────────────────────────────────
 # Gradio UI
 # ───────────────────────────────────────────────────────────────
-with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as demo:
+with gr.Blocks(title="SIGMA Local Assistant", analytics_enabled=False) as demo:
     gr.Markdown("## Sigma-LLM — Assistant local")
 
     with gr.Row():

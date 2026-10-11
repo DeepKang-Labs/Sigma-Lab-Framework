@@ -7,6 +7,9 @@ import secrets
 import subprocess
 import sys
 import time
+import threading
+import _thread
+import json
 from urllib.request import Request, urlopen
 
 root = Path(__file__).resolve().parents[1]
@@ -29,6 +32,24 @@ with args.model_file.open('rb') as stream:
 if args.context < 1024 or not all(1 <= value <= 65535 for value in (args.port, args.server_port)) or args.port == args.server_port:
     parser.error('Invalid context or ports.')
 args.data_dir.mkdir(parents=True, exist_ok=True)
+stop_token = secrets.token_urlsafe(32)
+control_path = args.data_dir / 'supervisor-control.json'
+stop_path = args.data_dir / 'stop-request.json'
+stop_path.unlink(missing_ok=True)
+control_path.write_text(json.dumps({'pid': os.getpid(), 'token': stop_token}), encoding='utf-8')
+shutdown = threading.Event()
+
+def watch_stop():
+    while not shutdown.wait(0.5):
+        try:
+            request = json.loads(stop_path.read_text(encoding='utf-8-sig'))
+            if secrets.compare_digest(str(request.get('token', '')), stop_token):
+                _thread.interrupt_main()
+                return
+        except (OSError, ValueError, TypeError):
+            pass
+
+threading.Thread(target=watch_stop, daemon=True).start()
 log_path = args.data_dir / 'llama-server.log'
 endpoint = f'http://127.0.0.1:{args.server_port}'
 engine_command = [str(args.engine.resolve())]
@@ -70,6 +91,7 @@ with log_path.open('w', encoding='utf-8') as log:
                     '--endpoint', endpoint, '--data-dir', str(args.data_dir), '--port', str(args.port)]
         runpy.run_path(str(root / 'scripts' / 'run_local_ui.py'), run_name='__main__')
     finally:
+        shutdown.set()
         if process.poll() is None:
             process.terminate()
             try:
@@ -77,3 +99,5 @@ with log_path.open('w', encoding='utf-8') as log:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+        control_path.unlink(missing_ok=True)
+        stop_path.unlink(missing_ok=True)
