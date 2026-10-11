@@ -211,3 +211,4 @@ __pycache__/
 scripts/skywire.config.yaml
 .tmp/repair/
 .tmp/local-checks/
+.tmp/llm-local/

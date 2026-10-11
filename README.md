@@ -39,6 +39,28 @@ profile uses Gradio 5. Run `python -m pytest ui_tests -q` to check startup separ
 On Windows, use a short virtual-environment path if package installation exceeds
 the operating system's path-length limit.
 
+### Local CPU LLM
+
+```bash
+python -m pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements-llm.txt -r requirements-ui.txt
+python scripts/run_local_ui.py
+```
+
+Open `http://127.0.0.1:7860`. This launcher uses isolated conversation/report files
+under `.tmp/llm-local/` and the Windows certificate store for verified HTTPS.
+The default model is `HuggingFaceTB/SmolLM2-135M-Instruct`, a small CPU-friendly
+instruct model. The first chat downloads its weights; later chats reuse the cache.
+Set `SIGMA_LLM_MODEL` to select another model explicitly. Loading failures do not
+silently switch to a larger model. Gated models require authorized model access.
+
+Optional judge/RAG loading is disabled by default. Enable `SIGMA_ENABLE_JUDGE=1`
+or `SIGMA_ENABLE_RAG=1` only with their extra dependencies and model resources.
+Reported Sigma metrics are experimental proxies, not verified factuality/safety.
+Run `python -m pytest llm_tests -q` for real inference on a tiny locally constructed
+model without network access. The two pretrained-model integration tests remain
+available through `python -m pytest --run-llm -q`.
+
 ## 🧩 Build Status & Meta
 
 | Type | Status | Runtime | License | Maintainer | Release |

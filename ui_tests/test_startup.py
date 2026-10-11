@@ -13,11 +13,12 @@ def test_interface_serves_without_loading_model(tmp_path, monkeypatch):
     monkeypatch.setenv('GRADIO_ANALYTICS_ENABLED', 'False')
     monkeypatch.setenv('HF_HUB_OFFLINE', '1')
     spec = importlib.util.spec_from_file_location('sigma_ui_under_test', root / 'app.py')
+    torch_was_loaded = 'torch' in sys.modules
     app = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(app)
     assert app._agent is None
     assert app.SigmaLLM is None
-    assert 'torch' not in sys.modules
+    assert ('torch' in sys.modules) == torch_was_loaded
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]

@@ -1,4 +1,5 @@
 import pytest
+import importlib
 
 
 def pytest_addoption(parser):
@@ -12,3 +13,14 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if 'llm' in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture
+def llm_agent(tmp_path, monkeypatch):
+    for name in ('CONFIGS', 'STATE', 'REPORTS', 'OUTPUTS'):
+        monkeypatch.setenv(f'SIGMA_{name}_DIR', str(tmp_path / name.lower()))
+    monkeypatch.setenv('SIGMA_ENABLE_JUDGE', '0')
+    monkeypatch.setenv('SIGMA_ENABLE_RAG', '0')
+    import sigma_llm_complete
+    sl = importlib.reload(sigma_llm_complete)
+    return sl, sl.SigmaLLM()

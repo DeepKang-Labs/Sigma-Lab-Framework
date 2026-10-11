@@ -32,12 +32,7 @@ SigmaLLM = None  # Import the optional model stack only when loading an agent.
 # ───────────────────────────────────────────────────────────────
 # Préférence modèle + chaîne de fallbacks
 # ───────────────────────────────────────────────────────────────
-PREFERRED = os.getenv("SIGMA_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
-FALLBACKS = [
-    "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-    "microsoft/Phi-3-mini-4k-instruct",
-    "meta-llama/Meta-Llama-3-8B-Instruct",
-]
+PREFERRED = os.getenv("SIGMA_LLM_MODEL", "HuggingFaceTB/SmolLM2-135M-Instruct")
 
 # Dossiers utiles (pour affichage & reset mémoire)
 CFG = os.getenv("SIGMA_CONFIGS_DIR", "configs")
@@ -62,14 +57,14 @@ def make_agent(model_name: str):
         try:
             SigmaLLM = import_sigma_llm()
         except ImportError as error:
-            raise RuntimeError('The interface is available, but the optional LLM stack is missing. Install requirements.txt and configure model access.') from error
-    tried = [model_name] + [m for m in FALLBACKS if m != model_name]
+            raise RuntimeError('The interface is available, but the optional LLM stack is missing. Install requirements-llm.txt and configure model access.') from error
+    tried = [model_name]
     last_err = None
     for m in tried:
         try:
             print(f"[SigmaLLM] Loading model: {m}", flush=True)
             _agent = SigmaLLM(model_name=m)
-            _active_model = m
+            _active_model = _agent.model_name
             return _agent
         except Exception as e:
             last_err = e
@@ -146,6 +141,7 @@ def chat_fn(message, history, temperature, top_p):
 # Callbacks UI: changer le modèle, reset mémoire, infos système
 # ───────────────────────────────────────────────────────────────
 AVAILABLE = [
+    "HuggingFaceTB/SmolLM2-135M-Instruct",
     "meta-llama/Meta-Llama-3-8B-Instruct",
     "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
     "microsoft/Phi-3-mini-4k-instruct",
@@ -169,7 +165,8 @@ def on_reset_memory():
 def info_text():
     here = os.getcwd()
     info = {
-        "active_model": _active_model or PREFERRED,
+        "active_model": _active_model,
+        "requested_model": PREFERRED,
         "cwd": here,
         "outputs": str(pathlib.Path(OUT).resolve()),
         "reports": str(pathlib.Path(RP).resolve()),
@@ -181,7 +178,7 @@ def info_text():
 # Gradio UI
 # ───────────────────────────────────────────────────────────────
 with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as demo:
-    gr.Markdown("## 🧠 Sigma-LLM — S(t) / O(t) / Δcoh — Interface interactive")
+    gr.Markdown("## Sigma-LLM — Local generation with experimental Sigma metrics")
 
     with gr.Row():
         model_dd = gr.Dropdown(
@@ -214,7 +211,7 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent", analytics_enabled=False) as de
         chatbot=gr.Chatbot(type="messages", height=460, avatar_images=(None, None), allow_tags=False),
         textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True),
         title="Sigma-LLM",
-        description="Agent réflexif (Llama-3 ready). Les sorties sont archivées dans outputs/ et reports/.",
+        description="The selected model loads on first use. Sigma metrics are experimental proxies; they do not verify factuality or safety.",
         cache_examples=False,
     )
 

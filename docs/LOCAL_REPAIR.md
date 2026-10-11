@@ -53,10 +53,10 @@ from this supported UI profile.
 * Real Skywire/Fiber transport and mesh synchronization need an actual supported
   endpoint/protocol, operator configuration, authorization and observed traffic.
   YAML transformation is not a transport integration.
-* LLM generation requires separate dependencies, model weights, adequate RAM/GPU
-  resources where applicable, and any gated-model access. Model inference was not
-  run in this repair. UI startup uses `requirements-ui.txt`; `requirements.txt`
-  remains the legacy full-stack profile and `requirements-core.txt` is lightweight.
+* The subsequent [local LLM restoration](LLM_RESTORATION.md) verifies small-model
+  CPU inference. Larger/gated models, GPU and optional evaluators remain unverified.
+  The minimal model profile is `requirements-llm.txt`; UI startup uses
+  `requirements-ui.txt` and `requirements-core.txt` remains lightweight.
 * Historical scheduled workflows, Docker/mesh services, live data feeds and model
   quality were not validated by local tests. Their status requires separate runs;
   this repair neither fabricates external results nor restores unsupported claims.

@@ -2,11 +2,9 @@
 import os
 import pytest
 pytestmark = pytest.mark.llm
-os.environ.setdefault("SIGMA_LLM_MODEL", "sshleifer/tiny-gpt2")
 
-def test_homeostasis_bounds_and_adjust():
-    import sigma_llm_complete as sl
-    agent = sl.SigmaLLM()
+def test_homeostasis_bounds_and_adjust(llm_agent):
+    sl, agent = llm_agent
 
     # valeurs de départ
     t0, p0 = agent.temp, agent.top_p

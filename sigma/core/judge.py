@@ -11,7 +11,7 @@ Given: (user_prompt), (model_output), and (evidence_passages),
 produce a factuality score in [0,1] and a one-line justification.
 
 Return JSON only:
-{"score": <float_0_to_1>, "justification": "<short>"}
+{{"score": <float_0_to_1>, "justification": "<short>"}}
 
 USER_PROMPT:
 {prompt}
@@ -26,7 +26,7 @@ EVIDENCE_PASSAGES (relevant snippets):
 JUDGE_PROMPT_COH = """You are a coherence and logic judge.
 Given the (model_output), score its internal coherence, non-contradiction,
 and logical flow in [0,1]. Return JSON only:
-{"score": <float_0_to_1>, "justification": "<short>"}
+{{"score": <float_0_to_1>, "justification": "<short>"}}
 
 MODEL_OUTPUT:
 {output}
@@ -45,7 +45,7 @@ def _generate_json(prompt: str, max_new_tokens=256) -> str:
     model, tok = _load()
     inputs = tok(prompt, return_tensors="pt")
     out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
-    text = tok.decode(out[0], skip_special_tokens=True)
+    text = tok.decode(out[0, inputs['input_ids'].shape[-1]:], skip_special_tokens=True)
     # Heuristique: extraire le dernier bloc JSON
     start = text.rfind("{")
     end   = text.rfind("}")

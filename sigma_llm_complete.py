@@ -13,6 +13,8 @@ Sigma-LLM v3.3.2 — DeepKang Integration (Meta-Llama-3 ready, CI-safe)
 """
 
 import os, json, math, time, hashlib, threading, pathlib, sys, re
+import copy
+import functools
 from dataclasses import dataclass
 from typing import Dict, List, Any, Deque, Tuple
 from collections import deque
@@ -39,6 +41,10 @@ try:
 except Exception:
     def judge_factuality(u,o,p): return 0.5
     def judge_coherence(o): return 0.5
+
+# Optional evaluators may load additional models; enable them explicitly.
+ENABLE_JUDGE = os.getenv('SIGMA_ENABLE_JUDGE', '0') == '1'
+ENABLE_RAG = os.getenv('SIGMA_ENABLE_RAG', '0') == '1'
 
 # ---------------------- Dossiers / Fichiers -----------------------------------
 CONFIGS_DIR  = os.getenv("SIGMA_CONFIGS_DIR",  "configs")
@@ -83,6 +89,8 @@ def safe_dump_json(path: str, data: Any):
 def _clip01(x):
     try:
         xf = float(x)
+        if not math.isfinite(xf):
+            return 0.5
         return 0.0 if xf < 0 else 1.0 if xf > 1 else xf
     except Exception:
         return 0.5
@@ -134,16 +142,22 @@ DEFAULT_SIGMA_PARAMS: Dict[str, Any] = {
 def load_sigma_params(config_dir: str = CONFIGS_DIR) -> Dict[str, Any]:
     p = pathlib.Path(config_dir) / "sigma_params.json"
     if p.exists():
-        try:
-            params = json.load(open(p, "r", encoding="utf-8"))
-            merged = DEFAULT_SIGMA_PARAMS | params
-            print(f"[Sigma] Paramètres chargés depuis {p}")
-            return merged
-        except Exception as e:
-            print(f"[Sigma] ⚠️ Erreur lecture params ({e}), fallback défauts")
+        with p.open('r', encoding='utf-8') as stream:
+            params = json.load(stream)
+        if not isinstance(params, dict):
+            raise ValueError('Sigma parameters must be a JSON object.')
+        merged = copy.deepcopy(DEFAULT_SIGMA_PARAMS)
+        def merge(target, source):
+            for key, value in source.items():
+                if isinstance(value, dict) and isinstance(target.get(key), dict):
+                    merge(target[key], value)
+                else:
+                    target[key] = copy.deepcopy(value)
+        merge(merged, params)
+        return merged
     else:
-        print(f"[Sigma] ⚠️ {p} introuvable, usage des défauts")
-    return DEFAULT_SIGMA_PARAMS.copy()
+        print(f"[Sigma] {p} not found; using illustrative defaults")
+    return copy.deepcopy(DEFAULT_SIGMA_PARAMS)
 
 # ---------------------- Cœurs Sigma -------------------------------------------
 class CoherenceEngine:
@@ -170,7 +184,12 @@ class ObjectivityEngine:
     def __init__(self, weights: List[float]):
         if len(weights) != 4:
             raise ValueError("O_weights must have 4 components")
-        self.w = [float(x) for x in weights]; self.O = 0.0
+        self.w = [float(x) for x in weights]
+        if any(not math.isfinite(w) or w < 0 for w in self.w) or not math.isfinite(sum(self.w)) or sum(self.w) <= 0:
+            raise ValueError('O_weights must be finite, non-negative and have a positive sum.')
+        total = sum(self.w)
+        self.w = [w / total for w in self.w]
+        self.O = 0.0
     @staticmethod
     def _clip01(x: float) -> float: return 0.0 if x < 0 else 1.0 if x > 1 else x
     def step(self, factuality: float, coherence: float, feedback: float, policy: float) -> float:
@@ -188,13 +207,22 @@ class EpisodicMemory:
 class ConversationMemory:
     def __init__(self, max_turns: int, path=CONV_FILE):
         self.path = path; self.max_turns = int(max_turns)
-        data = safe_load_json(self.path, [])
+        if self.max_turns < 2:
+            raise ValueError('Conversation memory must retain at least two messages.')
+        if os.path.exists(self.path):
+            with open(self.path, 'r', encoding='utf-8') as stream:
+                data = json.load(stream)
+            if not isinstance(data, list) or any(not isinstance(m, dict) or m.get('role') not in ('user', 'assistant', 'human', 'ai', 'system') or not isinstance(m.get('text'), str) for m in data):
+                raise ValueError('Invalid conversation memory; preserve and inspect the existing file.')
+        else:
+            data = []
         self.buffer: Deque[Dict[str, str]] = deque(data[-self.max_turns:], maxlen=self.max_turns)
     def add(self, role: str, text: str):
         self.buffer.append({"role": role, "text": text})
         safe_dump_json(self.path, list(self.buffer))
     def as_messages(self) -> List[Dict[str,str]]:
-        return [{"role": m["role"], "content": m["text"]} for m in self.buffer]
+        roles = {'human': 'user', 'ai': 'assistant'}
+        return [{"role": roles.get(m["role"], m["role"]), "content": m["text"]} for m in self.buffer]
     def render_legacy(self) -> str:
         return "\n".join(f"{m['role'].capitalize()}: {m['text']}" for m in self.buffer)
 
@@ -288,6 +316,8 @@ class SigmaMetrics:
 class Invariants:
     def check(self, m: SigmaMetrics) -> Dict[str, List[str]]:
         warns, errors = [], []
+        if any(not math.isfinite(getattr(m, key)) for key in ('delta_coh', 'S', 'O', 'meta_gain', 'entropy', 'temp', 'top_p')):
+            errors.append('Non-finite experimental metric')
         if abs(m.S) > 1e6: errors.append("S(t) magnitude too large")
         if not (0.0 <= m.O <= 1.0): errors.append("O(t) out of [0,1]")
         if not (0.0 <= m.entropy <= 12.0): warns.append("entropy unusual")
@@ -299,8 +329,17 @@ class PolicyGate:
         return self.allow_param_promotion and not inv.get("errors")
 
 # ---------------------- LLM Wrapper -------------------------------------------
+def serialized_generation(function):
+    @functools.wraps(function)
+    def wrapped(self, *args, **kwargs):
+        with self._generation_lock:
+            return function(self, *args, **kwargs)
+    return wrapped
+
+
 class SigmaLLM:
-    def __init__(self, model_name: str = None):
+    def __init__(self, model_name: str = None, *, local_files_only: bool = False):
+        self._generation_lock = threading.RLock()
         self.params = load_sigma_params()
         self.coh   = CoherenceEngine()
         self.subj  = SubjectivityEngine(decay=self.params.get("subjectivity_decay", 0.0))
@@ -312,12 +351,7 @@ class SigmaLLM:
         self.sidx  = SemanticIndex(max_items=si.get("max_items", 2000),
                                    min_sim=si.get("min_similarity_to_store", 0.15))
 
-        preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
-        fallback_chain = [
-            "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-            "microsoft/Phi-3-mini-4k-instruct",
-            "meta-llama/Meta-Llama-3-8B-Instruct",
-        ]
+        preferred = model_name or os.getenv("SIGMA_LLM_MODEL", "HuggingFaceTB/SmolLM2-135M-Instruct")
 
         # ---- Device & dtype
         if torch.cuda.is_available():
@@ -332,7 +366,7 @@ class SigmaLLM:
         self.model     = None
         self.model_name = None
 
-        tried = [preferred] + [m for m in fallback_chain if m != preferred]
+        tried = [preferred]  # Never silently download another model on failure.
         last_err = None
         hf_token = (
             os.getenv("HUGGING_FACE_HUB_TOKEN")
@@ -343,20 +377,15 @@ class SigmaLLM:
 
         for candidate in tried:
             try:
-                need_token = ("meta-llama" in candidate.lower())  # modèles gated
-                tok_kwargs = dict(use_fast=True, trust_remote_code=False)
+                tok_kwargs = dict(use_fast=True, trust_remote_code=False, local_files_only=local_files_only)
                 mdl_kwargs = dict(
                     torch_dtype=torch_dtype,
                     low_cpu_mem_usage=True,
                     device_map=device_map,
                     trust_remote_code=False,
+                    local_files_only=local_files_only,
                 )
-                if need_token:
-                    if not hf_token:
-                        raise RuntimeError(
-                            f"Model '{candidate}' requires a Hugging Face token. "
-                            "Set HUGGING_FACE_HUB_TOKEN (or HUGGINGFACE_TOKEN/HF_TOKEN/HF_API_TOKEN)."
-                        )
+                if hf_token:
                     tok_kwargs["token"] = hf_token
                     mdl_kwargs["token"] = hf_token
 
@@ -433,30 +462,30 @@ class SigmaLLM:
             else: self.top_p = newv
 
     # ---- Prompting universel (chat template si dispo)
-    def _build_inputs(self, user_msg: str):
+    def _build_inputs(self, user_msg: str, max_new_tokens: int = 200):
         messages = self.conv.as_messages() + [{"role": "user", "content": user_msg}]
         try:
             # Llama-3, Mistral, Phi-3 exposent un chat template
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
-        except Exception:
+            inputs = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)
+        except (ValueError, AttributeError):
             ctx = self.conv.render_legacy()
-            prompt = (ctx + "\nAI:").strip()
-            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True)
+            prompt = (ctx + "\nHuman: " + user_msg + "\nAI:").strip()
+            inputs = self.tokenizer(prompt, return_tensors="pt")
 
         # 🔐 Hardening: assurer au moins un token
         if "input_ids" not in inputs or inputs["input_ids"].shape[-1] == 0:
             inputs = self.tokenizer(" ", return_tensors="pt")
 
         # clamp si longueur > max_position_embeddings
-        try:
-            max_len = int(getattr(self.model.config, "max_position_embeddings", 4096))
-            if inputs["input_ids"].shape[-1] > max_len:
-                inputs = {k: v[:, -max_len:] for k, v in inputs.items()}
-        except Exception:
-            pass
+        max_len = int(getattr(self.model.config, "max_position_embeddings", 4096))
+        budget = max_len - max_new_tokens
+        if budget < 1:
+            raise ValueError('max_new_tokens must leave space for the prompt in the model context.')
+        if inputs['input_ids'].shape[-1] > budget:
+            inputs = {k: v[:, -budget:] for k, v in inputs.items()}
 
-        return inputs.to(self.model.device)
+        return {key: value.to(self.model.device) for key, value in inputs.items()}
 
     # ---- Nettoyage post-génération (anti-bégaiement, coupe à l'assistant)
     def _clean_output(self, raw_text: str) -> str:
@@ -464,17 +493,19 @@ class SigmaLLM:
         for marker in ("<|eot_id|>", "<|eos|>"):
             if marker in txt:
                 txt = txt.split(marker)[0]
-        parts = re.split(r'(?:\nAI:|\bassistant\b\s*:?)', txt, flags=re.IGNORECASE)
-        if len(parts) >= 2:
-            txt = parts[-1]
+        txt = re.sub(r'^\s*(?:AI|assistant)\s*:\s*', '', txt, flags=re.IGNORECASE)
         txt = re.sub(r'(\b[\w\.-]{1,12}\b)(?:\s+\1){3,}', r'\1', txt)
         return txt.strip()
 
     # ---- Génération principale
+    @serialized_generation
     @torch.no_grad()
     def generate(self, user_msg: str, max_new_tokens: int = 200) -> str:
-        self.conv.add("human", user_msg)
-        inputs = self._build_inputs(user_msg)
+        if not isinstance(user_msg, str) or not user_msg.strip():
+            raise ValueError('A non-empty text prompt is required.')
+        if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 1:
+            raise ValueError('max_new_tokens must be a positive integer.')
+        inputs = self._build_inputs(user_msg, max_new_tokens)
 
         # Entropie & homéostasie
         entropy = self._entropy_next(inputs)
@@ -511,18 +542,20 @@ class SigmaLLM:
 
         # Génération
         out_ids = self.model.generate(**inputs, **gen_kwargs)[0]
-        text_full = self.tokenizer.decode(out_ids, skip_special_tokens=False)
+        new_ids = out_ids[inputs['input_ids'].shape[-1]:]
+        text_full = self.tokenizer.decode(new_ids, skip_special_tokens=True)
 
         ai_text = self._clean_output(text_full)
         if not ai_text:
-            ai_text = self.tokenizer.decode(out_ids[-max_new_tokens:], skip_special_tokens=True).strip() or "(vide)"
+            ai_text = '(empty model response)'
 
-        self.conv.add("ai", ai_text)
+        self.conv.add("user", user_msg)
+        self.conv.add("assistant", ai_text)
 
         # Sigma metrics
         external = self.read_external_metrics()
 
-        lm_out = self.model(**inputs, labels=inputs["input_ids"])
+        lm_out = self.model(**inputs)
         last_logits = lm_out.logits[:, -1, :]
 
         pred_intent = self.intention_estimator(user_msg)
@@ -610,8 +643,10 @@ class SigmaLLM:
         return 0.2 if low else 0.9
 
     def groundtruth_check(self, user_prompt: str, output: str) -> float:
+        if not ENABLE_JUDGE:
+            return 0.5
         try:
-            passages = retrieve_topk(user_prompt, k=3)
+            passages = retrieve_topk(user_prompt, k=3) if ENABLE_RAG else []
         except Exception as e:
             print(f"[groundtruth] retrieve_topk fallback: {e}"); passages = []
         try:
@@ -621,6 +656,8 @@ class SigmaLLM:
             print(f"[groundtruth] judge_factuality fallback: {e}"); return 0.5
 
     def coherence_validator(self, output: str) -> float:
+        if not ENABLE_JUDGE:
+            return 0.5
         try:
             judg = judge_coherence(output)
             return _coerce_score(judg)
@@ -651,6 +688,7 @@ class SigmaLLM:
             "model": getattr(self, "model_name", "unknown"),
             "prompt": prompt[-2000:], "output": output[-8000:]
         }
+        rep['evaluation_scope'] = {'metrics': 'experimental_proxies', 'judge_enabled': ENABLE_JUDGE, 'rag_enabled': ENABLE_RAG}
         safe_dump_json(LAST_REPORT, rep)
         with open(EPISODES_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps({
@@ -662,6 +700,8 @@ class SigmaLLM:
         rec = {
             "ts": m.t, "model_name": getattr(self, "model_name", "unknown"),
             "model_hash": sha256(getattr(self, "model_name", "unknown")),
+            "model_hash_scope": "model_identifier_only_not_weight_integrity",
+            "model_revision": getattr(self.model.config, '_commit_hash', None),
             "prompt_hash": sha256(prompt), "output_hash": sha256(output),
             "delta_coh": m.delta_coh, "S": m.S, "O": m.O,
             "entropy": m.entropy, "temp": m.temp, "top_p": m.top_p,
@@ -709,10 +749,10 @@ if __name__ == "__main__":
     parser.add_argument("--report", action="store_true")
     args = parser.parse_args()
 
-    agent = SigmaLLM(model_name=args.model)
-
     if args.report:
         print(safe_load_json(LAST_REPORT, {})); raise SystemExit(0)
+
+    agent = SigmaLLM(model_name=args.model)
 
     if args.prompt:
         print("Sigma-LLM v3.3.2 (non-interactive). Generating...")

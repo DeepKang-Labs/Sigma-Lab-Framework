@@ -17,15 +17,13 @@ gradio>=5,<6
 prometheus-client>=0.19
 
 # --- LLM stack ---
-# Torch : garde cette pin si ton Codespace est CPU-only.
-# Pour GPU/CUDA, installe torch séparément avec l'index PyTorch adapté.
-#   CPU (exemple)  : pip install --index-url https://download.pytorch.org/whl/cpu torch==2.3.1
-#   CUDA 11.8 (ex) : pip install --index-url https://download.pytorch.org/whl/cu118 torch==2.3.1+cu118
-torch==2.3.1
+# Install CPU Torch first from https://download.pytorch.org/whl/cpu on CPU hosts.
+# For CUDA, select the matching official PyTorch wheel for the host GPU/driver.
+torch>=2.6,<3
 
 # Transformers/Accelerate récents pour Meta-Llama 3 + chat template stable
-transformers>=4.44.0
-accelerate>=0.33.0
+transformers>=4.44.0,<5
+accelerate>=0.33.0,<2
 
 # Quantization 4-bits (optionnelle, nécessite CUDA à l'exécution).
 # L'installation peut réussir en CPU-only, mais le chargement 4-bit ne sera activé
@@ -39,6 +37,7 @@ faiss-cpu>=1.8.0
 # HF Hub + sécurité
 huggingface-hub>=0.24.0
 safetensors>=0.4.3
+truststore>=0.10,<1; sys_platform == 'win32'
 
 # --- (Optionnel) API HTTP ---
 fastapi>=0.115.2
