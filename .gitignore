@@ -213,3 +213,5 @@ scripts/skywire.config.yaml
 .tmp/local-checks/
 .tmp/llm-local/
 .tmp/gguf-local/
+.tmp/dev-sandbox/
+.tmp/dev-gateway-state/

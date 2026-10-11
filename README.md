@@ -268,3 +268,7 @@ Skywire, Skycoin, Fiber and related names refer to third-party technologies.
 Their mention documents research context only and does not imply official association, endorsement, ownership, adoption, or partnership.
 “The network breathes — and the lab listens.”
 — Sigma-Lab · DeepKang Labs
+
+Local assistant development tooling is an opt-in isolated prototype. See
+[controlled local integration](docs/GOVERNED_LOCAL_INTEGRATION.md) for the
+read/propose/test boundary, separate human approval and orchestrator roadmap.
