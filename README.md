@@ -78,6 +78,11 @@ binds the model server to `127.0.0.1:8081`, then opens Sigma on port 7860. It ow
 the model process and shuts it down when the supervisor exits normally. Session
 reports live in `.tmp/gguf-local/`; model weights are not part of this repository.
 Only the UI dependencies are needed for this route (plus `truststore` on Windows).
+The launcher accepts either `llama-server` or the newer `llama serve` entry point.
+It loads host weights directly into RAM, and creates a private local API key for
+the owned model server. Browser origin access is restricted on engine versions
+that support the option. The key stays in the ignored local data directory and
+is never included in generation reports.
 
 Conversation input uses the browser's current history, with a system instruction
 defining Sigma's identity and language behavior. Reset starts a fresh conversation
@@ -90,9 +95,15 @@ is now opt-in through `SIGMA_HOMEOSTASIS=1` and does not override sliders by def
 Record French identity, capability, arithmetic, translation and memory examples
 using `python scripts/evaluate_local_chat.py --model MODEL_ALIAS`. These are smoke
 checks requiring inspection, not a benchmark proving correctness or safety.
+When using the supervisor's authenticated server, set `SIGMA_LLAMA_API_KEY` in
+the evaluation process to the contents of `.tmp/gguf-local/local-api-key.txt`.
+Do not publish this local key. Each recorded check includes usage and finish
+status so incomplete answers can be distinguished from completed generations.
 The [pinned Qwen35 profile](configs/local_qwen35_manifest.json) records expected
 download hashes and deployment settings. Native generation uses seed 42 by default
 (`SIGMA_LLM_SEED` overrides it); different hardware/backend versions may still vary.
+See [local hardware validation](docs/LOCAL_GGUF_VALIDATION.md) for tested settings,
+actual conversational checks, timings and scope limitations.
 
 ## 🧩 Build Status & Meta
 

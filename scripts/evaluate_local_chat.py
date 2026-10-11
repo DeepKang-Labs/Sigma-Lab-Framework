@@ -12,6 +12,7 @@ from sigma.local_chat import LocalChatLLM
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--model')
+parser.add_argument('--max-new-tokens', type=int, default=400)
 parser.add_argument('--output', type=Path, default=root / '.tmp' / 'gguf-local' / 'conversation-checks.json')
 args = parser.parse_args()
 os.environ.setdefault('SIGMA_REPORTS_DIR', str(args.output.parent / 'evaluation-reports'))
@@ -27,11 +28,16 @@ cases = [
     ('fresh_session', 'Quel prénom t’ai-je donné ? Réponds brièvement en français.', []),
 ]
 records = []
+
+def generation_metadata():
+    report = json.loads((agent.report_dir / 'sigma_llm_last_report.json').read_text(encoding='utf-8'))
+    return {key: report.get(key) for key in ('usage', 'finish_reason', 'temperature', 'top_p', 'seed')}
+
 for name, prompt, history in cases:
     started = time.monotonic()
-    response = agent.generate(prompt, max_new_tokens=160, history=history)
+    response = agent.generate(prompt, max_new_tokens=args.max_new_tokens, history=history)
     record = {'case': name, 'prompt': prompt, 'history': history, 'response': response,
-              'seconds': round(time.monotonic() - started, 2)}
+              'seconds': round(time.monotonic() - started, 2), **generation_metadata()}
     records.append(record)
     print(json.dumps(record, ensure_ascii=False), flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -42,10 +48,10 @@ for number, prompt in enumerate(('hey salam', 'parle en français', 'Que sais-tu
                                 'Quel service ?', 'Who are you?',
                                 'I want to speak with you now. Who are you? Are you OK?'), 1):
     started = time.monotonic()
-    response = agent.generate(prompt, max_new_tokens=160, history=history)
+    response = agent.generate(prompt, max_new_tokens=args.max_new_tokens, history=history)
     record = {'case': f'conversation_replay_{number}', 'prompt': prompt,
               'history': list(history), 'response': response,
-              'seconds': round(time.monotonic() - started, 2)}
+              'seconds': round(time.monotonic() - started, 2), **generation_metadata()}
     records.append(record)
     history += [{'role': 'user', 'content': prompt}, {'role': 'assistant', 'content': response}]
     print(json.dumps(record, ensure_ascii=False), flush=True)

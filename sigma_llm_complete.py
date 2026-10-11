@@ -18,7 +18,7 @@ import functools
 from dataclasses import dataclass
 from typing import Dict, List, Any, Deque, Tuple
 from collections import deque
-from sigma.local_chat import SYSTEM_PROMPT, normalize_history
+from sigma.local_chat import conversation_system_prompt, normalize_history
 
 # --- Unbuffered stdout pour Actions / CI ---
 try:
@@ -465,13 +465,14 @@ class SigmaLLM:
     # ---- Prompting universel (chat template si dispo)
     def _build_inputs(self, user_msg: str, max_new_tokens: int = 200, history=None):
         previous = self.conv.as_messages() if history is None else normalize_history(history)
-        messages = [{'role': 'system', 'content': SYSTEM_PROMPT.format(model=self.model_name)}] + previous + [{"role": "user", "content": user_msg}]
+        instruction = conversation_system_prompt(self.model_name, previous, user_msg)
+        messages = [{'role': 'system', 'content': instruction}] + previous + [{"role": "user", "content": user_msg}]
         try:
             # Llama-3, Mistral, Phi-3 exposent un chat template
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             inputs = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)
         except (ValueError, AttributeError):
-            ctx = SYSTEM_PROMPT.format(model=self.model_name) + '\n' + '\n'.join(f"{m['role']}: {m['content']}" for m in previous)
+            ctx = instruction + '\n' + '\n'.join(f"{m['role']}: {m['content']}" for m in previous)
             prompt = (ctx + "\nHuman: " + user_msg + "\nAI:").strip()
             inputs = self.tokenizer(prompt, return_tensors="pt")
 

@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import re
 from pathlib import Path
 import threading
 import time
@@ -12,6 +13,9 @@ SYSTEM_PROMPT = (
     'You are Sigma, a local AI assistant running on the user\'s computer. '
     'You are not a human or a customer service representative. '
     'Answer the actual question directly. Reply in the language requested by the user; '
+    'Default to a brief, natural answer of one to three sentences unless detail is requested. '
+    'Do not repeat your identity or limitations unless asked or relevant. '
+    'A greeting needs a greeting; a language change needs only a short acknowledgment. '
     'Keep an explicit language preference across later turns until the user changes it. '
     'when the language is unclear, use French. Do not invent meetings, services, '
     'phone calls, email capabilities, personal experiences or facts about your configuration. '
@@ -31,6 +35,30 @@ def normalize_history(history):
             raise ValueError('History must contain text user/assistant messages.')
         messages.append({'role': entry['role'], 'content': entry['content']})
     return messages
+
+
+def conversation_system_prompt(model, history, prompt):
+    """Preserve explicit French/English requests across input language changes."""
+    preference = None
+    names = {'français': 'French', 'francais': 'French', 'french': 'French',
+             'anglais': 'English', 'english': 'English'}
+    pattern = re.compile(
+        r'\b(?:parle[rz]?|r[ée]pond(?:s|ez|re)?|[ée]cris|[ée]crivez|continue[rz]?|'
+        r'speak|reply|answer|respond|write|continue)\s+'
+        r'(?:(?:uniquement|seulement|only|just|briefly|brièvement)\s+)?'
+        r'(?:(?:en|in)\s+)?(français|francais|french|anglais|english)\b', re.I)
+    for message in [*normalize_history(history), {'role': 'user', 'content': prompt}]:
+        if message['role'] == 'user':
+            for match in pattern.finditer(message['content']):
+                prefix = message['content'][:match.start()]
+                if re.search(r"\b(?:not|never|don't|don’t|ne)\s*$", prefix, re.I):
+                    continue
+                preference = names[match.group(1).lower()]
+    instruction = SYSTEM_PROMPT.format(model=model)
+    if preference:
+        instruction += (f' The active response language is {preference}. Reply in {preference}. '
+                        'A question written in another language does not change this explicit preference.')
+    return instruction
 
 
 class LocalChatLLM:
@@ -53,12 +81,16 @@ class LocalChatLLM:
 
     def _request(self, path, payload=None):
         data = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8') if payload is not None else None
-        request = Request(self.endpoint + path, data=data, headers={'Content-Type': 'application/json'})
+        headers = {'Content-Type': 'application/json'}
+        api_key = os.getenv('SIGMA_LLAMA_API_KEY')
+        if api_key:
+            headers['Authorization'] = 'Bearer ' + api_key
+        request = Request(self.endpoint + path, data=data, headers=headers)
         with urlopen(request, timeout=600) as response:
             return json.load(response)
 
     def _messages(self, prompt, history, tokens):
-        messages = [{'role': 'system', 'content': SYSTEM_PROMPT.format(model=self.model_name)}]
+        messages = [{'role': 'system', 'content': conversation_system_prompt(self.model_name, history, prompt)}]
         messages += normalize_history(history)
         messages.append({'role': 'user', 'content': prompt})
         while True:

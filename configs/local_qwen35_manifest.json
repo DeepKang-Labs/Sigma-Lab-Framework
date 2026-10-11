@@ -10,9 +10,10 @@
   },
   "engine": {
     "repository": "ggml-org/llama.cpp",
-    "release": "b11552",
-    "asset": "llama-b11552-bin-win-vulkan-x64.zip",
-    "expected_sha256": "83dc16325b532ba603034719e8377e28ca5093c5d4370141a6522f1a0250386c"
+    "release": "b9000",
+    "asset": "llama-b9000-bin-win-vulkan-x64.zip",
+    "expected_sha256": "6900d078dc7b7ddcb7f56a5db7eee14e82b68854dabec9f0cd12124f98c63812",
+    "entry_point": "llama-server.exe"
   },
   "inference": {
     "context_tokens": 4096,
@@ -21,6 +22,8 @@
     "gpu_layers": "auto",
     "gpu_margin_mib": 1024,
     "thinking": false,
+    "memory_mapped_weights": false,
+    "local_api_authentication": true,
     "temperature": 0.6,
     "top_p": 0.9,
     "seed": 42

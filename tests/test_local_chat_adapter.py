@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import pytest
-from sigma.local_chat import LocalChatLLM, normalize_history
+from sigma.local_chat import LocalChatLLM, normalize_history, conversation_system_prompt
 
 
 @pytest.fixture
@@ -60,3 +60,29 @@ def test_invalid_history_and_sampling(adapter):
     agent.temp = float('nan')
     with pytest.raises(ValueError):
         agent.generate('hello')
+
+
+def test_local_authentication_header(monkeypatch):
+    import io
+    import sigma.local_chat as local_chat
+    monkeypatch.setenv('SIGMA_LLAMA_API_KEY', 'test-local-token')
+    captured = []
+    def open_request(request, timeout):
+        captured.append(request)
+        return io.BytesIO(b'{"data": []}')
+    monkeypatch.setattr(local_chat, 'urlopen', open_request)
+    agent = LocalChatLLM.__new__(LocalChatLLM)
+    agent.endpoint = 'http://127.0.0.1:8081'
+    assert agent._request('/v1/models') == {'data': []}
+    assert captured[0].get_header('Authorization') == 'Bearer test-local-token'
+    assert captured[0].full_url == 'http://127.0.0.1:8081/v1/models'
+
+
+def test_explicit_language_survives_english_questions_and_assistant_drift():
+    history = [{'role': 'user', 'content': 'parle en français'},
+               {'role': 'assistant', 'content': 'I will reply in English.'}]
+    assert 'active response language is French' in conversation_system_prompt('test', history, 'Who are you?')
+    assert 'active response language is English' in conversation_system_prompt('test', history, 'Reply in English now.')
+    assert 'active response language is French' in conversation_system_prompt('test', history, 'Do not reply in English.')
+    assert 'active response language is English' in conversation_system_prompt('test', history, 'Répondez en anglais.')
+    assert 'active response language' not in conversation_system_prompt('test', [], 'Translate this into English.')

@@ -3,11 +3,11 @@ import argparse
 import os
 from pathlib import Path
 import runpy
+import secrets
 import subprocess
 import sys
 import time
-from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -31,23 +31,35 @@ if args.context < 1024 or not all(1 <= value <= 65535 for value in (args.port, a
 args.data_dir.mkdir(parents=True, exist_ok=True)
 log_path = args.data_dir / 'llama-server.log'
 endpoint = f'http://127.0.0.1:{args.server_port}'
-command = [str(args.engine.resolve()), '-m', str(args.model_file.resolve()),
+engine_command = [str(args.engine.resolve())]
+if args.engine.stem.lower() == 'llama':
+    engine_command.append('serve')
+help_result = subprocess.run([*engine_command, '--help'], capture_output=True, text=True, timeout=30, check=True)
+api_key = secrets.token_urlsafe(32)
+os.environ['SIGMA_LLAMA_API_KEY'] = api_key
+(args.data_dir / 'local-api-key.txt').write_text(api_key, encoding='utf-8')
+server_environment = os.environ.copy()
+server_environment['LLAMA_API_KEY'] = api_key
+command = [*engine_command, '-m', str(args.model_file.resolve()),
            '--alias', args.alias, '--host', '127.0.0.1', '--port', str(args.server_port),
            '-c', str(args.context), '-np', '1', '-ngl', args.gpu_layers,
            '--fit', 'on', '--fit-target', '1024', '-t', '4', '-tb', '4',
-           '-b', '256', '-ub', '128', '--chat-template-kwargs', '{"enable_thinking":false}']
+           '-b', '256', '-ub', '128', '--reasoning', 'off', '--no-mmap']
+if '--cors-origins' in help_result.stdout:
+    command += ['--cors-origins', 'localhost']
 with log_path.open('w', encoding='utf-8') as log:
-    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=server_environment)
     try:
         deadline = time.monotonic() + 600
         while True:
             if process.poll() is not None:
-                raise RuntimeError(f'Local model server exited. See {log_path}')
+                raise RuntimeError(f'Local model server exited with status {process.returncode}. See {log_path}')
             try:
-                with urlopen(endpoint + '/health', timeout=2) as response:
+                request = Request(endpoint + '/health', headers={'Authorization': 'Bearer ' + api_key})
+                with urlopen(request, timeout=2) as response:
                     if response.status == 200:
                         break
-            except (URLError, TimeoutError):
+            except OSError:
                 pass
             if time.monotonic() > deadline:
                 raise RuntimeError(f'Model server did not become ready. See {log_path}')
