@@ -1,0 +1,6 @@
+# Install CPU Torch first using https://download.pytorch.org/whl/cpu on CPU hosts.
+torch>=2.6,<3
+transformers>=4.44,<5
+accelerate>=0.33,<2
+truststore>=0.10,<1; sys_platform == 'win32'
+# Judge, RAG and quantization are optional and excluded from this minimal route.

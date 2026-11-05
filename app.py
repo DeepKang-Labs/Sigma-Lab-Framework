@@ -1,4 +1,4 @@
-# app.py — Gradio UI pour Sigma-LLM (Llama-3 ready, Codespaces friendly)
+# Sigma local chat UI: Transformers or a loopback llama.cpp server.
 
 import os, sys, importlib.util, traceback, json, pathlib
 import gradio as gr
@@ -7,6 +7,9 @@ import gradio as gr
 # Import robuste de SigmaLLM (à la racine ou par chemin explicite)
 # ───────────────────────────────────────────────────────────────
 def import_sigma_llm():
+    if os.getenv('SIGMA_LLM_BACKEND', 'transformers') == 'llama.cpp':
+        from sigma.local_chat import LocalChatLLM
+        return LocalChatLLM
     try:
         from sigma_llm_complete import SigmaLLM
         return SigmaLLM
@@ -27,17 +30,12 @@ def import_sigma_llm():
             raise ImportError("SigmaLLM non trouvé dans sigma_llm_complete.py")
         return mod.SigmaLLM
 
-SigmaLLM = import_sigma_llm()
+SigmaLLM = None  # Import the optional model stack only when loading an agent.
 
 # ───────────────────────────────────────────────────────────────
 # Préférence modèle + chaîne de fallbacks
 # ───────────────────────────────────────────────────────────────
-PREFERRED = os.getenv("SIGMA_LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
-FALLBACKS = [
-    "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-    "microsoft/Phi-3-mini-4k-instruct",
-    "meta-llama/Meta-Llama-3-8B-Instruct",
-]
+PREFERRED = os.getenv("SIGMA_LLM_MODEL", "HuggingFaceTB/SmolLM2-135M-Instruct")
 
 # Dossiers utiles (pour affichage & reset mémoire)
 CFG = os.getenv("SIGMA_CONFIGS_DIR", "configs")
@@ -56,15 +54,20 @@ _agent = None
 _active_model = None
 
 def make_agent(model_name: str):
-    """Instancie SigmaLLM avec fallback en cascade si besoin."""
-    global _agent, _active_model
-    tried = [model_name] + [m for m in FALLBACKS if m != model_name]
+    """Connect to or load the explicitly selected model."""
+    global _agent, _active_model, SigmaLLM
+    if SigmaLLM is None:
+        try:
+            SigmaLLM = import_sigma_llm()
+        except ImportError as error:
+            raise RuntimeError('The interface is available, but the optional LLM stack is missing. Install requirements-llm.txt and configure model access.') from error
+    tried = [model_name]
     last_err = None
     for m in tried:
         try:
             print(f"[SigmaLLM] Loading model: {m}", flush=True)
             _agent = SigmaLLM(model_name=m)
-            _active_model = m
+            _active_model = _agent.model_name
             return _agent
         except Exception as e:
             last_err = e
@@ -109,19 +112,14 @@ def chat_fn(message, history, temperature, top_p):
       - history: list[(user, assistant)]
       - temperature/top_p: sliders (additional_inputs)
     """
-    agent = get_agent()
-
-    # pilote direct des curseurs de l’agent
     try:
-        agent.temp = float(temperature)
-        agent.top_p = float(top_p)
-    except Exception:
-        pass
+        agent = get_agent()
+    except Exception as error:
+        return 'Model unavailable: '+str(error)
 
     try:
-        reply = agent.generate(message, max_new_tokens=200)
-        if isinstance(reply, str) and "AI:" in reply:
-            reply = reply.split("AI:")[-1].strip()
+        reply = agent.generate(message, max_new_tokens=400, history=history,
+                               temperature=temperature, top_p=top_p)
         # garde: sauvegarder aussi pour debug rapide
         try:
             with open(LATEST_OUT, "w", encoding="utf-8") as f:
@@ -138,16 +136,19 @@ def chat_fn(message, history, temperature, top_p):
 # Callbacks UI: changer le modèle, reset mémoire, infos système
 # ───────────────────────────────────────────────────────────────
 AVAILABLE = [
+    "HuggingFaceTB/SmolLM2-135M-Instruct",
     "meta-llama/Meta-Llama-3-8B-Instruct",
     "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
     "microsoft/Phi-3-mini-4k-instruct",
     "meta-llama/Meta-Llama-3-8B-Instruct",
 ]
+if os.getenv('SIGMA_LLM_BACKEND') == 'llama.cpp':
+    AVAILABLE = [PREFERRED]
 
 def on_change_model(new_model):
     try:
         make_agent(new_model)
-        return f"✅ Modèle chargé: {new_model}"
+        return f"Model loaded: {_active_model}"
     except Exception as e:
         return f"❌ Échec chargement {new_model}: {e}"
 
@@ -159,21 +160,14 @@ def on_reset_memory():
         return f"❌ Reset échoué: {e}"
 
 def info_text():
-    here = os.getcwd()
-    info = {
-        "active_model": _active_model or PREFERRED,
-        "cwd": here,
-        "outputs": str(pathlib.Path(OUT).resolve()),
-        "reports": str(pathlib.Path(RP).resolve()),
-        "state": str(pathlib.Path(ST).resolve()),
-    }
-    return "```\n" + json.dumps(info, indent=2, ensure_ascii=False) + "\n```"
+    model = _active_model or PREFERRED
+    return f'**Modèle sélectionné :** {model}  \nLes rapports sont enregistrés localement.'
 
 # ───────────────────────────────────────────────────────────────
 # Gradio UI
 # ───────────────────────────────────────────────────────────────
-with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
-    gr.Markdown("## 🧠 Sigma-LLM — S(t) / O(t) / Δcoh — Interface interactive")
+with gr.Blocks(title="SIGMA Local Assistant", analytics_enabled=False) as demo:
+    gr.Markdown("## Sigma-LLM — Assistant local")
 
     with gr.Row():
         model_dd = gr.Dropdown(
@@ -182,10 +176,10 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
             label="Modèle",
             interactive=True,
         )
-        temp = gr.Slider(minimum=0.60, maximum=1.30, value=0.95, step=0.01, label="temperature")
-        topp = gr.Slider(minimum=0.70, maximum=0.99, value=0.95, step=0.01, label="top_p")
+        temp = gr.Slider(minimum=0.10, maximum=1.30, value=0.6, step=0.01, label="temperature")
+        topp = gr.Slider(minimum=0.10, maximum=1.00, value=0.9, step=0.01, label="top_p")
         btn_reload = gr.Button("🔄 Recharger modèle")
-        btn_reset  = gr.Button("🧹 Reset mémoire")
+        btn_reset  = gr.Button("Nouvelle conversation")
 
     # zone d’état
     status_msg = gr.Markdown()
@@ -196,30 +190,28 @@ with gr.Blocks(title="Sigma-LLM Reflexive Agent") as demo:
         return msg, info_text()
 
     btn_reload.click(_reload, inputs=model_dd, outputs=[status_msg, status])
-    btn_reset.click(lambda: (on_reset_memory(), info_text()), outputs=[status_msg, status])
 
     gr.Markdown("### 💬 Chat")
     chat = gr.ChatInterface(
         fn=chat_fn,
+        type="messages",
         additional_inputs=[temp, topp],  # ✅ sliders réellement reliés à chat_fn
-        chatbot=gr.Chatbot(height=460, avatar_images=(None, None)),
+        chatbot=gr.Chatbot(type="messages", height=460, avatar_images=(None, None), allow_tags=False),
         textbox=gr.Textbox(placeholder="Tape ton message…", autofocus=True),
         title="Sigma-LLM",
-        description="Agent réflexif (Llama-3 ready). Les sorties sont archivées dans outputs/ et reports/.",
-        theme="soft",
+        description=("Conversation avec le modèle local. Demandez une réponse dans la langue de votre choix."
+                     if os.getenv('SIGMA_LLM_BACKEND') == 'llama.cpp' else
+                     "The selected model loads on first use. Sigma metrics are experimental proxies; they do not verify factuality or safety."),
         cache_examples=False,
     )
+    btn_reset.click(lambda: ('New conversation started.', info_text(), [], [], None),
+                    outputs=[status_msg, status, chat.chatbot, chat.chatbot_state, chat.saved_input])
 
 # ───────────────────────────────────────────────────────────────
 # Lancement serveur (Codespaces/localhost)
 # ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Pré-initialise pour feedback immédiat dans l’UI
-    try:
-        make_agent(PREFERRED)
-    except Exception as e:
-        print(f"[boot] warning: preferred model not available ({e}) — UI démarre avec fallback à la première requête.")
-
     port = int(os.getenv("PORT", "7860"))
-    print(f"[SigmaLLM] Gradio démarre sur 0.0.0.0:{port}", flush=True)
-    demo.launch(server_name="0.0.0.0", server_port=port, show_error=True)
+    host = os.getenv('SIGMA_BIND_HOST','127.0.0.1')
+    print(f"[SigmaLLM] Interface starting on {host}:{port}; model loading is deferred.", flush=True)
+    demo.launch(server_name=host, server_port=port, show_error=True)

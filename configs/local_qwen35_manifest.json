@@ -1,0 +1,32 @@
+{
+  "profile": "local-qwen35-q4",
+  "model": {
+    "repository": "unsloth/Qwen3.5-35B-A3B-GGUF",
+    "revision": "bc014a17be43adabd7066b7a86075ff935c6a4e2",
+    "filename": "Qwen3.5-35B-A3B-Q4_K_M.gguf",
+    "bytes": 22016023168,
+    "expected_sha256": "3b46d1066bc91cc2d613e3bc22ce691dd77e6f0d33c9060690d24ce6de494375",
+    "license": "Apache-2.0"
+  },
+  "engine": {
+    "repository": "ggml-org/llama.cpp",
+    "release": "b9000",
+    "asset": "llama-b9000-bin-win-vulkan-x64.zip",
+    "expected_sha256": "6900d078dc7b7ddcb7f56a5db7eee14e82b68854dabec9f0cd12124f98c63812",
+    "entry_point": "llama-server.exe"
+  },
+  "inference": {
+    "context_tokens": 4096,
+    "parallel_slots": 1,
+    "cpu_threads": 4,
+    "gpu_layers": "auto",
+    "gpu_margin_mib": 1024,
+    "thinking": false,
+    "memory_mapped_weights": false,
+    "local_api_authentication": true,
+    "temperature": 0.6,
+    "top_p": 0.9,
+    "seed": 42
+  },
+  "scope": "Pinned download and deployment profile; hashes verify bytes, not model quality."
+}

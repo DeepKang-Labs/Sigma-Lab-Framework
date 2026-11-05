@@ -11,6 +11,8 @@ import os
 import json
 import time
 import hashlib
+import math
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 from difflib import SequenceMatcher
@@ -89,6 +91,8 @@ class NetworkBridge:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         self._mappings_raw = data
+        if not isinstance(data,dict) or not isinstance(data.get('mappings'),list) or not data['mappings']:
+            raise ValueError('Mappings require a nonempty mappings list')
         self._aliases = data.get("aliases", {})
         out: List[TensionMapping] = []
         for m in data.get("mappings", []):
@@ -138,10 +142,18 @@ class NetworkBridge:
 
     def validate_discovery(self, data: Dict[str, Any]) -> List[str]:
         warnings: List[str] = []
+        if not isinstance(data,dict) or not isinstance(data.get('decision_points'),list) or not data['decision_points']:
+            return ['Discovery requires a nonempty decision_points list']
         for dp in data.get("decision_points", []):
+            if not isinstance(dp,dict):
+                warnings.append('Decision must be an object')
+                continue
             if "decision_id" not in dp:
                 warnings.append("Decision without 'decision_id'")
             gd = dp.get("governance_dimensions", {})
+            if not isinstance(gd,dict):
+                warnings.append('governance_dimensions must be an object')
+                continue
             for k in (
                 "technical_complexity",
                 "economic_impact",
@@ -149,7 +161,7 @@ class NetworkBridge:
                 "security_implications",
             ):
                 v = gd.get(k, None)
-                if v is None or not (0 <= v <= 10):
+                if type(v) not in (int,float) or not math.isfinite(v) or not (0 <= v <= 10):
                     warnings.append(f"{dp.get('decision_id','?')}: {k} out of [0..10] or missing")
         return warnings
 
@@ -180,13 +192,16 @@ class NetworkBridge:
             return 0.5
         try:
             from simpleeval import simple_eval  # lazy import
-        except Exception:
-            return 0.5
+        except ImportError as error:
+            raise ValueError('Expression evaluation requires simpleeval') from error
         try:
             val = simple_eval(expr, names=env)
-            return clip01(float(val))
-        except Exception:
-            return 0.5
+            value = float(val)
+            if isinstance(val,bool) or not math.isfinite(value):
+                raise ValueError('Expression result must be finite')
+            return clip01(value)
+        except Exception as error:
+            raise ValueError('Invalid risk expression: '+expr) from error
 
     def _derive_risks(self, decision: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, float]:
         gd = decision.get("governance_dimensions", {})
@@ -201,6 +216,8 @@ class NetworkBridge:
         lin = mapping.get("derive_risk_linear")
         if self.formula_eval_mode in ("linear", "auto") and lin:
             scale = float(lin.get("scale", 10.0))
+            if not math.isfinite(scale) or scale <= 0:
+                raise ValueError('Linear risk scale must be finite and positive')
 
             def sel(key: str) -> float:
                 src = lin.get(key)
@@ -308,7 +325,11 @@ class NetworkBridge:
         os.makedirs(self.export_contexts_dir, exist_ok=True)
         for c in contexts:
             fn = f"{c['metadata']['original_decision_id']}.yaml"
-            with open(os.path.join(self.export_contexts_dir, fn), "w", encoding="utf-8") as f:
+            root = Path(self.export_contexts_dir).resolve()
+            destination = (root/fn).resolve()
+            if destination.parent != root:
+                raise ValueError('Decision identifier must be a single filename component')
+            with destination.open("w", encoding="utf-8") as f:
                 yaml.safe_dump(c, f, sort_keys=False, allow_unicode=True)
 
     # ---------- Recommendations & Report ----------

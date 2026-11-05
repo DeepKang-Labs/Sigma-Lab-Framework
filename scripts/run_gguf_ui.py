@@ -1,0 +1,103 @@
+"""Run a local GGUF model and Sigma UI; shut down the owned server on exit."""
+import argparse
+import os
+from pathlib import Path
+import runpy
+import secrets
+import subprocess
+import sys
+import time
+import threading
+import _thread
+import json
+from urllib.request import Request, urlopen
+
+root = Path(__file__).resolve().parents[1]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--engine', type=Path, required=True)
+parser.add_argument('--model-file', type=Path, required=True)
+parser.add_argument('--alias')
+parser.add_argument('--data-dir', type=Path, default=root / '.tmp' / 'gguf-local')
+parser.add_argument('--context', type=int, default=4096)
+parser.add_argument('--gpu-layers', default='auto')
+parser.add_argument('--port', type=int, default=7860)
+parser.add_argument('--server-port', type=int, default=8081)
+args = parser.parse_args()
+args.alias = args.alias or args.model_file.stem
+if not args.engine.is_file() or not args.model_file.is_file():
+    parser.error('The engine executable and downloaded model must exist.')
+with args.model_file.open('rb') as stream:
+    if stream.read(4) != b'GGUF':
+        parser.error('The model does not have a GGUF header.')
+if args.context < 1024 or not all(1 <= value <= 65535 for value in (args.port, args.server_port)) or args.port == args.server_port:
+    parser.error('Invalid context or ports.')
+args.data_dir.mkdir(parents=True, exist_ok=True)
+stop_token = secrets.token_urlsafe(32)
+control_path = args.data_dir / 'supervisor-control.json'
+stop_path = args.data_dir / 'stop-request.json'
+stop_path.unlink(missing_ok=True)
+control_path.write_text(json.dumps({'pid': os.getpid(), 'token': stop_token}), encoding='utf-8')
+shutdown = threading.Event()
+
+def watch_stop():
+    while not shutdown.wait(0.5):
+        try:
+            request = json.loads(stop_path.read_text(encoding='utf-8-sig'))
+            if secrets.compare_digest(str(request.get('token', '')), stop_token):
+                _thread.interrupt_main()
+                return
+        except (OSError, ValueError, TypeError):
+            pass
+
+threading.Thread(target=watch_stop, daemon=True).start()
+log_path = args.data_dir / 'llama-server.log'
+endpoint = f'http://127.0.0.1:{args.server_port}'
+engine_command = [str(args.engine.resolve())]
+if args.engine.stem.lower() == 'llama':
+    engine_command.append('serve')
+help_result = subprocess.run([*engine_command, '--help'], capture_output=True, text=True, timeout=30, check=True)
+api_key = secrets.token_urlsafe(32)
+os.environ['SIGMA_LLAMA_API_KEY'] = api_key
+(args.data_dir / 'local-api-key.txt').write_text(api_key, encoding='utf-8')
+server_environment = os.environ.copy()
+server_environment['LLAMA_API_KEY'] = api_key
+command = [*engine_command, '-m', str(args.model_file.resolve()),
+           '--alias', args.alias, '--host', '127.0.0.1', '--port', str(args.server_port),
+           '-c', str(args.context), '-np', '1', '-ngl', args.gpu_layers,
+           '--fit', 'on', '--fit-target', '1024', '-t', '4', '-tb', '4',
+           '-b', '256', '-ub', '128', '--reasoning', 'off', '--no-mmap']
+if '--cors-origins' in help_result.stdout:
+    command += ['--cors-origins', 'localhost']
+with log_path.open('w', encoding='utf-8') as log:
+    process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=server_environment)
+    try:
+        deadline = time.monotonic() + 600
+        while True:
+            if process.poll() is not None:
+                raise RuntimeError(f'Local model server exited with status {process.returncode}. See {log_path}')
+            try:
+                request = Request(endpoint + '/health', headers={'Authorization': 'Bearer ' + api_key})
+                with urlopen(request, timeout=2) as response:
+                    if response.status == 200:
+                        break
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                raise RuntimeError(f'Model server did not become ready. See {log_path}')
+            time.sleep(0.5)
+        print(f'Local model ready: {args.alias}; Sigma UI on port {args.port}', flush=True)
+        os.environ['SIGMA_LLAMA_CONTEXT'] = str(args.context)
+        sys.argv = ['run_local_ui.py', '--backend', 'llama.cpp', '--model', args.alias,
+                    '--endpoint', endpoint, '--data-dir', str(args.data_dir), '--port', str(args.port)]
+        runpy.run_path(str(root / 'scripts' / 'run_local_ui.py'), run_name='__main__')
+    finally:
+        shutdown.set()
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        control_path.unlink(missing_ok=True)
+        stop_path.unlink(missing_ok=True)

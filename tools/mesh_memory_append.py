@@ -87,7 +87,8 @@ def load_or_init_memory(path: Path) -> Dict[str, Any]:
             if isinstance(data, dict) and "runs" in data and isinstance(data["runs"], list):
                 return data
         except Exception:
-            pass
+            raise ValueError('Existing mesh memory is unreadable; refusing to overwrite it: '+str(path))
+        raise ValueError('Existing mesh memory has an invalid structure: '+str(path))
     return {"version": "1.0", "runs": []}
 
 
@@ -122,7 +123,7 @@ def main() -> None:
     memory["runs"].append(entry)
     save_json(memory_path, memory)
 
-    print(f"[MeshMemory] Appended {report_path} → {memory_path} (total runs: {len(memory['runs'])})")
+    print(f"[MeshMemory] Appended {report_path} -> {memory_path} (total runs: {len(memory['runs'])})")
 
 
 if __name__ == "__main__":

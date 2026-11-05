@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import math
 import json
 import random
+import copy
 
 # ---------------- Utils ----------------
 
@@ -100,10 +101,10 @@ class SigmaLab:
     def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         cfg = {
             "weights": asdict(Weights(provenance=Provenance(
-                "Hospital Ethics Board", "POL-H-12", "Clinical prioritization policy"
+                "Sigma-Lab illustrative defaults", None, "Example weights; no external policy authority asserted"
             ))),
             "thresholds": asdict(Thresholds(provenance=Provenance(
-                "Hospital Ethics Board", "POL-H-09", "Harm floors & irreversibility veto"
+                "Sigma-Lab illustrative defaults", None, "Example thresholds; no external policy authority asserted"
             ))),
             "harm_model": {
                 "base_weight": 0.7,
@@ -131,8 +132,34 @@ class SigmaLab:
             },
             "verdict_acceptance_threshold": 0.65,
         }
-        for k, v in (config or {}).items():
-            cfg[k] = v
+        def merge(base, changes):
+            for key, value in changes.items():
+                if isinstance(value, dict) and isinstance(base.get(key), dict):
+                    merge(base[key], value)
+                else:
+                    base[key] = copy.deepcopy(value)
+        changes = copy.deepcopy(config or {})
+        for key in ('weights','thresholds'):
+            if isinstance(changes.get(key), dict) and 'values' in changes[key]:
+                block = changes[key]
+                changes[key] = dict(block['values'])
+                if 'provenance' in block:
+                    changes[key]['provenance'] = block['provenance']
+        merge(cfg, changes)
+        names = ('non_harm','stability','resilience','equity')
+        values = [cfg['weights'][name] for name in names]
+        if not all(type(value) in (int,float) and math.isfinite(value) and value >= 0 for value in values) or not math.isfinite(sum(values)) or sum(values) <= 0:
+            raise ValueError('Weights must be finite, non-negative and have a positive sum')
+        total = sum(values)
+        for name in names:
+            cfg['weights'][name] /= total
+        for name in ('non_harm_floor','veto_irreversibility'):
+            value = cfg['thresholds'][name]
+            if type(value) not in (int,float) or not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(name+' must be a finite number in [0,1]')
+        value = cfg['verdict_acceptance_threshold']
+        if type(value) not in (int,float) or not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError('verdict_acceptance_threshold must be finite and in [0,1]')
         # ensure provenance are dicts
         if isinstance(cfg["weights"].get("provenance"), Provenance):
             cfg["weights"]["provenance"] = asdict(cfg["weights"]["provenance"])
@@ -183,12 +210,43 @@ class SigmaLab:
         if ctx.short_term_risk is None:
             raise ValueError("error: short_term_risk is required")
         # tolerant coercions for the rest
+        for name in ('short_term_risk', 'long_term_risk', 'irreversibility_risk'):
+            value = getattr(ctx, name)
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+                valid = not isinstance(value, bool) and math.isfinite(numeric) and 0 <= numeric <= 1
+            except (TypeError, ValueError, OverflowError):
+                valid = False
+            if not valid:
+                errs.append(f'{name} must be a finite number in [0,1]')
+                # Keep an inspectable diagnostic, without an acceptance verdict.
+                setattr(ctx, name, 0.5)
         st = clamp(ctx.short_term_risk)
         lt = clamp(ctx.long_term_risk if ctx.long_term_risk is not None else 0.5)
         irr = clamp(ctx.irreversibility_risk if ctx.irreversibility_risk is not None else 0.5)
         ctx.short_term_risk = st
         ctx.long_term_risk = lt
         ctx.irreversibility_risk = irr
+        for name in ('resilience_features','stability_risks'):
+            values = getattr(ctx,name)
+            if not isinstance(values,dict):
+                errs.append(name+' must be an object')
+                setattr(ctx,name,{})
+                continue
+            for key,value in list(values.items()):
+                if type(value) not in (int,float) or not math.isfinite(value) or not 0 <= value <= 1:
+                    errs.append(f'{name}.{key} must be a finite number in [0,1]')
+                    values[key] = 0.5
+        if not isinstance(ctx.stakeholders,(list,tuple)):
+            errs.append('stakeholders must be a list')
+            ctx.stakeholders = []
+        for stakeholder in ctx.stakeholders:
+            for field_name in ('vulnerability','impact_benefit'):
+                value = stakeholder.get(field_name,0.5) if isinstance(stakeholder,dict) else getattr(stakeholder,field_name,0.5)
+                if type(value) not in (int,float) or not math.isfinite(value) or not 0 <= value <= 1:
+                    errs.append('stakeholder '+field_name+' must be a finite number in [0,1]')
         ctx.stakeholders = self._coerce_stakeholders(ctx.stakeholders)
         return errs
 
@@ -223,6 +281,7 @@ class SigmaLab:
     # ----- main API -----
 
     def diagnose(self, ctx: OptionContext, verdict_opt_in: bool = True) -> Dict[str, Any]:
+        ctx = copy.deepcopy(ctx)
         warnings: List[str] = []
         input_errors = self.validate_context(ctx)
 
@@ -274,18 +333,20 @@ class SigmaLab:
         if irr > thr.get("veto_irreversibility", 0.7):
             vetoes.append(f"irreversibility veto ({irr:.2f} > {thr.get('veto_irreversibility', 0.7):.2f})")
 
+        aggregate_score = sum(scores[name]*self.cfg['weights'][name] for name in scores)
         verdict = None
-        if verdict_opt_in:
-            mean_score = sum(scores.values()) / 4.0
+        if verdict_opt_in and not input_errors:
+            mean_score = aggregate_score
             if not vetoes and mean_score >= self.cfg.get("verdict_acceptance_threshold", 0.65):
                 verdict = "ACCEPT"
 
         ts = now_iso_utc()
         result: Dict[str, Any] = {
-            "status": "success",
+            "status": "invalid_input" if input_errors else "success",
             "warnings": warnings,
             "input_errors": input_errors,
             "scores": scores,
+            "aggregate_score": aggregate_score,
             "details": details,
             "vetoes": vetoes,
             "verdict": verdict,

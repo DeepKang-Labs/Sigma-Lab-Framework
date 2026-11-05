@@ -1,0 +1,5 @@
+# Offline diagnostic, mapping and test profile; no model downloads.
+PyYAML>=6.0.2,<7
+simpleeval>=1.0,<2
+numpy>=1.26,<3
+pytest>=8,<10
