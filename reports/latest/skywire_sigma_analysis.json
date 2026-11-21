@@ -1,12 +1,12 @@
 {
-  "date_utc": "2026-11-20",
+  "date_utc": "2026-11-21",
   "engine": "sigma-v1",
   "inputs": {
     "source": "unknown",
     "payloads": 9
   },
   "features": {
-    "success_ratio_pct": 22.22,
+    "success_ratio_pct": 33.33,
     "latency_avg_ms": null,
     "supply": {
       "height": null,
@@ -15,5 +15,5 @@
       "coin_hours": null
     }
   },
-  "generated_utc": "2026-11-20T11:46:59.225364Z"
+  "generated_utc": "2026-11-21T11:13:05.499784Z"
 }

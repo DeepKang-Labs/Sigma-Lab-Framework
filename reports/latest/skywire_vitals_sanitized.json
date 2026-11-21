@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-11-20",
+  "date_utc": "2026-11-21",
   "meta": {
     "repo": "DeepKang-Labs/Sigma-Lab-Framework",
     "agent": "SkywireVitalSigns v3.4.0"
@@ -29,7 +29,7 @@
         "height": null,
         "current_supply": "24444726.000000",
         "total_supply": "25000000.000000",
-        "coin_hours": "1270360984031",
+        "coin_hours": "1270629316852",
         "note": null
       }
     },
@@ -46,31 +46,31 @@
         {
           "__url__": "https://sd.skycoin.com/api/services?type=proxy",
           "__ok__": false,
-          "__status__": 502,
+          "__status__": 404,
           "__error__": null
         },
         {
           "__url__": "https://sd.skycoin.com/api/services?type=vpn",
           "__ok__": false,
-          "__status__": 502,
+          "__status__": 404,
           "__error__": null
         },
         {
           "__url__": "https://tpd.skywire.skycoin.com/all-transports",
           "__ok__": false,
-          "__status__": 502,
+          "__status__": 404,
           "__error__": null
         },
         {
           "__url__": "https://dmsgd.skywire.skycoin.com/dmsg-discovery/entries",
           "__ok__": false,
-          "__status__": 502,
+          "__status__": 404,
           "__error__": null
         },
         {
           "__url__": "https://rf.skywire.skycoin.com/",
-          "__ok__": false,
-          "__status__": 502,
+          "__ok__": true,
+          "__status__": 200,
           "__error__": null
         }
       ],
@@ -80,7 +80,7 @@
         "vpn": 0,
         "transports": 0,
         "dmsg_entries": 0,
-        "rf_status": "502 (ok=0)",
+        "rf_status": "200 (ok=1)",
         "samples": {
           "proxy": [],
           "vpn": [],
