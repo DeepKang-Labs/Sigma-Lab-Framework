@@ -1,5 +1,5 @@
 {
-  "date_utc": "2026-11-26",
+  "date_utc": "2026-11-27",
   "engine": "sigma-v1",
   "inputs": {
     "source": "unknown",
@@ -15,5 +15,5 @@
       "coin_hours": null
     }
   },
-  "generated_utc": "2026-11-26T12:43:00.988054Z"
+  "generated_utc": "2026-11-27T12:32:17.275715Z"
 }
